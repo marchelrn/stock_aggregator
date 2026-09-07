@@ -1,0 +1,9 @@
+.env
+*.log
+*.out
+bin/
+tmp/
+.air*
+Stocks/
+database_backup/
+.gmail_token.json
