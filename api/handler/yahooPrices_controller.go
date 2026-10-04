@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -53,13 +54,23 @@ func (c *YahooPricesController) GetPrices(ctx *gin.Context) {
 
 	tickerList := strings.Split(strings.ToUpper(tickers), ",")
 
-	prices, err := c.yahooService.GetPrices(tickerList)
+	prices, failed, err := c.yahooService.GetPrices(tickerList)
 	if err != nil {
 		HandleError(ctx, errs.BadRequest(err.Error()))
 		return
 	}
 
+	// `failed` berisi ticker yang tidak berhasil diambil (jika ada), agar client
+	// tahu bahwa hasil ini sebagian dan bisa menandai ticker yang salah.
+	notFound := make([]string, 0, len(failed))
+	for t := range failed {
+		notFound = append(notFound, t)
+	}
+	sort.Strings(notFound)
+
 	ctx.JSON(http.StatusOK, gin.H{
-		"data": prices,
+		"data":      prices,
+		"not_found": notFound,
+		"partial":   len(notFound) > 0,
 	})
 }

@@ -55,6 +55,6 @@ type TransactionService interface {
 
 type YahooService interface {
 	GetPrice(ticker string) (*models.StockPrice, error)
-	GetPrices(tickers []string) (map[string]*models.StockPrice, error)
+	GetPrices(tickers []string) (prices map[string]*models.StockPrice, failed map[string]string, err error)
 	GetAllPrices() ([]models.StockPrice, error)
 }

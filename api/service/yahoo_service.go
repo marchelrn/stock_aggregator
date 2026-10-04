@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -93,13 +95,42 @@ func (s *YahooService) GetAllPrices() ([]models.StockPrice, error) {
 	return s.YahooRepository.GetAllPrices()
 }
 
-func (s *YahooService) GetPrices(tickers []string) (map[string]*models.StockPrice, error) {
+// GetPrices mengambil harga untuk banyak ticker sekaligus.
+//
+// Mengembalikan:
+//   - prices: ticker yang berhasil diambil
+//   - failed: ticker yang gagal beserta alasannya (ticker -> pesan error)
+//   - err:    hanya terisi jika SEMUA ticker gagal
+//
+// Dengan begitu pemanggil bisa membedakan hasil sebagian (partial) dari hasil penuh,
+// bukan menganggap seluruh permintaan berhasil hanya karena sebagian ticker valid.
+func (s *YahooService) GetPrices(tickers []string) (map[string]*models.StockPrice, map[string]string, error) {
 	prices := make(map[string]*models.StockPrice)
+	failed := make(map[string]string)
+
+	// Normalisasi: trim, buang yang kosong, dan hilangkan duplikat.
+	seen := make(map[string]struct{}, len(tickers))
+	unique := make([]string, 0, len(tickers))
+	for _, t := range tickers {
+		t = strings.ToUpper(strings.TrimSpace(t))
+		if t == "" {
+			continue
+		}
+		if _, ok := seen[t]; ok {
+			continue
+		}
+		seen[t] = struct{}{}
+		unique = append(unique, t)
+	}
+
+	if len(unique) == 0 {
+		return nil, nil, errs.BadRequest("ticker is required")
+	}
+
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	var firstErr error
 
-	for _, ticker := range tickers {
+	for _, ticker := range unique {
 		wg.Add(1)
 		go func(t string) {
 			defer wg.Done()
@@ -107,9 +138,7 @@ func (s *YahooService) GetPrices(tickers []string) (map[string]*models.StockPric
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
-				if firstErr == nil {
-					firstErr = errs.BadRequest("yahoo API error: No data found, symbol may be delisted")
-				}
+				failed[t] = err.Error()
 				return
 			}
 			prices[t] = price
@@ -118,9 +147,14 @@ func (s *YahooService) GetPrices(tickers []string) (map[string]*models.StockPric
 
 	wg.Wait()
 
-	if len(prices) == 0 && firstErr != nil {
-		return nil, firstErr
+	if len(prices) == 0 {
+		names := make([]string, 0, len(failed))
+		for t := range failed {
+			names = append(names, t)
+		}
+		sort.Strings(names)
+		return nil, failed, errs.BadRequest(fmt.Sprintf("yahoo API error: no data found for %s", strings.Join(names, ", ")))
 	}
 
-	return prices, nil
+	return prices, failed, nil
 }
