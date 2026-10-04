@@ -189,16 +189,16 @@ type ParsedTrade struct {
 }
 
 type GmailSyncResponse struct {
-	StatusCode    int           `json:"status_code"`
-	Message       string        `json:"message"`
-	TradesFound   int           `json:"trades_found"`
-	TradesSynced  int           `json:"trades_synced"`
-	ParsedTrades  []ParsedTrade `json:"parsed_trades"`
+	StatusCode   int           `json:"status_code"`
+	Message      string        `json:"message"`
+	TradesFound  int           `json:"trades_found"`
+	TradesSynced int           `json:"trades_synced"`
+	ParsedTrades []ParsedTrade `json:"parsed_trades"`
 }
 
 type GmailSyncStatusResponse struct {
-	StatusCode      int        `json:"status_code"`
-	Message         string     `json:"message"`
-	GmailSyncEnabled bool      `json:"gmail_sync_enabled"`
-	LastSyncAt      *time.Time `json:"last_sync_at"`
+	StatusCode       int        `json:"status_code"`
+	Message          string     `json:"message"`
+	GmailSyncEnabled bool       `json:"gmail_sync_enabled"`
+	LastSyncAt       *time.Time `json:"last_sync_at"`
 }
