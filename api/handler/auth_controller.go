@@ -100,3 +100,18 @@ func (c *AuthController) GoogleCallback(ctx *gin.Context) {
 
 	ctx.Redirect(http.StatusTemporaryRedirect, frontendURL+"/auth/callback?token="+response.Token)
 }
+
+func (c *AuthController) GetUserInformation(ctx *gin.Context) {
+	userGetID, ok := ctx.Get("user_id")
+	if !ok {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "user_id tidak ditemukan"})
+		return
+	}
+	userID := userGetID.(float64)
+	user, err := c.service.Auth.GetUserInformation(userID)
+	if err != nil {
+		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(user.StatusCode, user)
+}

@@ -15,6 +15,7 @@ type Repository struct {
 type AuthRepository interface {
 	FindByEmail(email string) (*models.Users, error)
 	FindByID(id uint) (*models.Users, error)
+	FindByIDFloat64(id float64) (*models.Users, error)
 	FindByProviderID(providerID string) (*models.Users, error)
 	CreateUser(user *models.Users) (*models.Users, error)
 	UpdateUser(user *models.Users) (*models.Users, error)

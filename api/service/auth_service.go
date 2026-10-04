@@ -232,3 +232,16 @@ func (s *AuthService) GetGoogleLoginURL(state string) string {
 		oauth2.ApprovalForce,
 	)
 }
+
+func (s *AuthService) GetUserInformation(UserID float64) (*dto.UserResponse, error) {
+	user, err := s.AuthRepository.FindByIDFloat64(UserID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &dto.UserResponse{
+		StatusCode: http.StatusOK,
+		Message:    "User retrieved successfully",
+		Data:       s.userToDTO(user),
+	}, nil
+}

@@ -29,6 +29,14 @@ func (r *AuthRepository) FindByID(id uint) (*models.Users, error) {
 	return &user, nil
 }
 
+func (r *AuthRepository) FindByIDFloat64(id float64) (*models.Users, error) {
+	var user models.Users
+	if err := r.db.First(&user, id).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
 func (r *AuthRepository) FindByProviderID(providerID string) (*models.Users, error) {
 	var user models.Users
 	if err := r.db.Where("provider_id = ?", providerID).First(&user).Error; err != nil {

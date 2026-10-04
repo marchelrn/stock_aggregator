@@ -112,6 +112,7 @@ func SetupRoutes(s *contract.Service) *gin.Engine {
 		// Gmail sync routes
 		protected.POST("/gmail/sync", gmailController.SyncTradeConfirmations)
 		protected.GET("/gmail/status", gmailController.GetSyncStatus)
+		protected.GET("/auth/user", authController.GetUserInformation)
 	}
 
 	return r

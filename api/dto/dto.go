@@ -144,9 +144,9 @@ type UserData struct {
 }
 
 type UserResponse struct {
-	StatusCode int        `json:"status_code"`
-	Message    string     `json:"message"`
-	Data       []UserData `json:"data"`
+	StatusCode int      `json:"status_code"`
+	Message    string   `json:"message"`
+	Data       UserData `json:"data"`
 }
 
 // Auth Struct

@@ -19,6 +19,7 @@ type AuthService interface {
 	Login(payload *dto.LoginRequest) (*dto.AuthResponse, error)
 	GoogleLogin(code string) (*dto.AuthResponse, error)
 	GetGoogleLoginURL(state string) string
+	GetUserInformation(userID float64) (*dto.UserResponse, error)
 }
 
 type GmailService interface {
