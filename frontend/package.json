@@ -1,23 +1,27 @@
 {
   "name": "stock-portfolio-dashboard",
   "version": "1.0.0",
-  "description": "Stock Portfolio Dashboard - Vue.js Frontend",
+  "description": "Stock Portfolio Dashboard - React + TypeScript Frontend",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsc && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "vue": "^3.4.21",
-    "vue-router": "^4.6.4",
-    "vue-toastification": "^2.0.0-rc.5"
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.6",
+    "react-toastify": "^11.1.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^5.0.4",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react-swc": "^4.3.3",
     "autoprefixer": "^10.4.27",
     "postcss": "^8.5.8",
     "tailwindcss": "^3.4.17",
+    "typescript": "^5.6.3",
     "vite": "^8.2.0"
   }
 }
