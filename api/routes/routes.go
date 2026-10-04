@@ -72,11 +72,11 @@ func SetupRoutes(s *contract.Service) *gin.Engine {
 			})
 		})
 		// Stock routes
-		api.GET("/stocks", stockController.GetAllStocks)
-		api.GET("/stock/:ticker", stockController.GetStocks)
-		api.POST("/stock", stockController.AddStockData)
-		api.PUT("/stock/:ticker", stockController.UpdateStock)
-		api.DELETE("/stock/:ticker", stockController.DeleteStockData)
+		api.GET("my/stocks", stockController.GetAllStocks)
+		api.GET("my/stock/:ticker", stockController.GetStocks)
+		api.POST("my/stock", stockController.AddStockData)
+		api.PUT("my/stock/:ticker", stockController.UpdateStock)
+		api.DELETE("my/stock/:ticker", stockController.DeleteStockData)
 
 		// Broker routes
 		api.GET("/brokers", brokerController.GetAllBrokers)
