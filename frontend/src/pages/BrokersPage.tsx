@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePortfolio } from '../context/PortfolioContext'
 import { formatCurrency } from '../lib/formatters'
-import type { Holding } from '../types'
+import type { Broker, Holding } from '../types'
 import BrokerTable from '../components/BrokerTable'
 import HoldingTable from '../components/HoldingTable'
 import TransactionHistory from '../components/TransactionHistory'
@@ -14,14 +14,25 @@ interface TradeModalState {
 }
 
 export default function BrokersPage() {
-  const { state, loadDashboard, addBroker, createTransaction, fetchStockPrices, clearLiveStockPrices, setStatus } =
-    usePortfolio()
+  const {
+    state,
+    loadDashboard,
+    addBroker,
+    deleteBroker,
+    createTransaction,
+    fetchStockPrices,
+    clearLiveStockPrices,
+    setStatus,
+  } = usePortfolio()
 
   // Broker yang holding-nya ditampilkan. Boleh lebih dari satu (atau kosong).
   const [selectedBrokerIds, setSelectedBrokerIds] = useState<number[]>([])
   // Broker yang sudah pernah dilihat, agar broker baru otomatis tercentang sekali
   // tanpa memaksa ulang pilihan user yang sengaja mematikan toggle.
   const knownBrokerIds = useRef<Set<number>>(new Set())
+
+  const [brokerToRemove, setBrokerToRemove] = useState<Broker | null>(null)
+  const [removing, setRemoving] = useState(false)
 
   const [configureOpen, setConfigureOpen] = useState(false)
   const [configBrokerName, setConfigBrokerName] = useState('')
@@ -61,6 +72,15 @@ export default function BrokersPage() {
     setSelectedBrokerIds((current) =>
       current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
     )
+  }
+
+  const confirmRemoveBroker = async () => {
+    if (!brokerToRemove || removing) return
+    setRemoving(true)
+    const success = await deleteBroker(brokerToRemove.name)
+    setRemoving(false)
+    // Pilihan broker yang dihapus dibersihkan otomatis oleh efek sinkronisasi di atas.
+    if (success) setBrokerToRemove(null)
   }
 
   const filteredHoldings = useMemo(() => {
@@ -138,6 +158,7 @@ export default function BrokersPage() {
             brokers={state.brokers}
             selectedBrokerIds={selectedBrokerIds}
             onToggle={handleToggleBroker}
+            onRemove={setBrokerToRemove}
           />
         </section>
 
@@ -171,6 +192,50 @@ export default function BrokersPage() {
           />
         </section>
       </div>
+
+      {brokerToRemove && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4"
+          onClick={() => !removing && setBrokerToRemove(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-slate-300 bg-white p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-lg font-semibold">Disconnect Broker</h3>
+            </div>
+
+            <p className="text-sm text-slate-600">
+              Putuskan koneksi <strong>{brokerToRemove.name}</strong>? <br />Data portofolio dari broker
+              ini tidak akan diambil lagi.
+            </p>
+            <p className="mt-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700">
+              Broker beserta seluruh <i>holding</i> saham di dalamnya akan dihapus dan tidak bisa
+              dikembalikan. Riwayat transaksi tetap tersimpan.
+            </p>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-lg bg-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-300 disabled:opacity-50"
+                onClick={() => setBrokerToRemove(null)}
+                disabled={removing}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-rose-700 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-800 disabled:opacity-50"
+                onClick={confirmRemoveBroker}
+                disabled={removing}
+              >
+                {removing ? 'Memutuskan...' : 'Disconnect'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {tradeModal.open && (
         <div
