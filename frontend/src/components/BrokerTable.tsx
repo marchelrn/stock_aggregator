@@ -3,13 +3,13 @@ import type { Broker } from '../types'
 
 interface BrokerTableProps {
   brokers?: Broker[]
-  selectedBrokerId?: number | null
+  selectedBrokerIds?: number[]
   onToggle?: (id: number) => void
 }
 
 export default function BrokerTable({
   brokers = [],
-  selectedBrokerId = null,
+  selectedBrokerIds = [],
   onToggle,
 }: BrokerTableProps) {
   return (
@@ -45,7 +45,7 @@ export default function BrokerTable({
                     <input
                       type="checkbox"
                       className="peer sr-only"
-                      checked={selectedBrokerId === broker.id}
+                      checked={selectedBrokerIds.includes(broker.id)}
                       onChange={() => onToggle?.(broker.id)}
                     />
                     <div className="peer h-5 w-9 rounded-full bg-slate-200 after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-teal-600 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-teal-300"></div>

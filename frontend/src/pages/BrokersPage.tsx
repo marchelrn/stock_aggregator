@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePortfolio } from '../context/PortfolioContext'
 import { formatCurrency } from '../lib/formatters'
 import type { Holding } from '../types'
@@ -17,7 +17,11 @@ export default function BrokersPage() {
   const { state, loadDashboard, addBroker, createTransaction, fetchStockPrices, clearLiveStockPrices, setStatus } =
     usePortfolio()
 
-  const [selectedBrokerId, setSelectedBrokerId] = useState<number | null>(null)
+  // Broker yang holding-nya ditampilkan. Boleh lebih dari satu (atau kosong).
+  const [selectedBrokerIds, setSelectedBrokerIds] = useState<number[]>([])
+  // Broker yang sudah pernah dilihat, agar broker baru otomatis tercentang sekali
+  // tanpa memaksa ulang pilihan user yang sengaja mematikan toggle.
+  const knownBrokerIds = useRef<Set<number>>(new Set())
 
   const [configureOpen, setConfigureOpen] = useState(false)
   const [configBrokerName, setConfigBrokerName] = useState('')
@@ -37,21 +41,32 @@ export default function BrokersPage() {
     loadDashboard()
   }, [loadDashboard])
 
-  // Preselect the first broker once the list is available.
+  // Sinkronkan pilihan dengan daftar broker:
+  // - broker baru otomatis dicentang (semua tampil secara default)
+  // - broker yang sudah dihapus dibuang dari pilihan
   useEffect(() => {
-    if (state.brokers.length > 0 && selectedBrokerId === null) {
-      setSelectedBrokerId(state.brokers[0].id)
-    }
-  }, [state.brokers, selectedBrokerId])
+    const currentIds = state.brokers.map((b) => b.id)
+    const newIds = currentIds.filter((id) => !knownBrokerIds.current.has(id))
+    newIds.forEach((id) => knownBrokerIds.current.add(id))
+
+    setSelectedBrokerIds((prev) => {
+      const stillExists = prev.filter((id) => currentIds.includes(id))
+      const next = [...stillExists, ...newIds]
+      const unchanged = next.length === prev.length && next.every((id, i) => id === prev[i])
+      return unchanged ? prev : next
+    })
+  }, [state.brokers])
 
   const handleToggleBroker = (id: number) => {
-    setSelectedBrokerId((current) => (current === id ? null : id))
+    setSelectedBrokerIds((current) =>
+      current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
+    )
   }
 
   const filteredHoldings = useMemo(() => {
-    if (selectedBrokerId === null) return []
-    return state.holdings.filter((h) => Number(h.broker_id) === selectedBrokerId)
-  }, [state.holdings, selectedBrokerId])
+    if (selectedBrokerIds.length === 0) return []
+    return state.holdings.filter((h) => selectedBrokerIds.includes(Number(h.broker_id)))
+  }, [state.holdings, selectedBrokerIds])
 
   const tradeValueText = useMemo(
     () => formatCurrency(Number(tradeLot || 0) * 100 * Number(tradePrice || 0)),
@@ -121,7 +136,7 @@ export default function BrokersPage() {
           </div>
           <BrokerTable
             brokers={state.brokers}
-            selectedBrokerId={selectedBrokerId}
+            selectedBrokerIds={selectedBrokerIds}
             onToggle={handleToggleBroker}
           />
         </section>
@@ -129,8 +144,10 @@ export default function BrokersPage() {
         <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-xl font-semibold">Holdings by Broker Selected</h2>
-            {selectedBrokerId && (
-              <span className="text-sm text-slate-500">Filtered by selected broker</span>
+            {state.brokers.length > 0 && (
+              <span className="text-sm text-slate-500">
+                {selectedBrokerIds.length} of {state.brokers.length} Brokers
+              </span>
             )}
           </div>
           <HoldingTable holdings={filteredHoldings} />
