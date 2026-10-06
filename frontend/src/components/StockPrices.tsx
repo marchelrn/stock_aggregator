@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { formatNumber, formatPercent, plClass } from '../lib/formatters'
 import type { StockPriceMap } from '../types'
+import { Search } from 'lucide-react'
 
 interface StockPricesProps {
   prices?: StockPriceMap
@@ -47,10 +48,19 @@ export default function StockPrices({ prices = {}, onFetch, onClear }: StockPric
         />
         <button
           type="submit"
-          className="rounded-lg bg-teal-700 px-2 py-2 text-xs font-semibold text-white hover:bg-teal-800"
+          className="rounded-md bg-teal-700 px-2 py-2 text-xs font-semibold text-white hover:bg-teal-800"
         >
-          Get Prices
+          <Search
+            size={36}
+            nonScalingStroke={true}
+            className="rounded-md bg-teal-700 px-2 py-2 font-semibold text-white hover:bg-teal-800"
+            aria-label='Search Prices'
+            onClick={handleSubmit}
+          />
         </button>
+
+
+
         <button
           type="button"
           className="rounded-lg bg-slate-500 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
@@ -59,11 +69,11 @@ export default function StockPrices({ prices = {}, onFetch, onClear }: StockPric
           Clear
         </button>
       </form>
-      <div className="mt-3 overflow-auto rounded-xl border border-slate-300 bg-white">
+      <div className="mt-3 gap-2 overflow-auto rounded-xl border border-slate-300 bg-white">
         <table className="w-full min-w-[560px] border-collapse">
           <thead>
             <tr className="bg-slate-50 text-slate-500">
-              <th className="border-b border-slate-300 p-2 text-left text-xs">Ticker</th>
+              <th className="border-b border-slate-300 p-5 text-left text-xs">Ticker</th>
               <th className="border-b border-slate-300 p-2 text-left text-xs">Price</th>
               <th className="border-b border-slate-300 p-2 text-left text-xs">Prev Close</th>
               <th className="border-b border-slate-300 p-2 text-left text-xs">Change</th>
@@ -81,7 +91,7 @@ export default function StockPrices({ prices = {}, onFetch, onClear }: StockPric
             ) : (
               sortedEntries.map((price) => (
                 <tr key={price.ticker}>
-                  <td className="border-b border-slate-100 p-2 text-sm font-semibold">
+                  <td className="border-b border-slate-100 p-4 text-sm font-semibold">
                     {price.ticker}
                   </td>
                   <td className="border-b border-slate-100 p-2 text-sm">

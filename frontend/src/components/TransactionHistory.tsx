@@ -11,7 +11,7 @@ export default function TransactionHistory({ transactionHistory = [] }: Transact
 
   return (
     <div>
-      <form className="mt-3 flex flex-col gap-2 sm:flex-row" onSubmit={(e) => e.preventDefault()}>
+      <form className="mt-3       flex flex-col gap-2 sm:flex-row" onSubmit={(e) => e.preventDefault()}>
         <input
           value={transactions}
           onChange={(e) => setTransactions(e.target.value)}
@@ -22,15 +22,30 @@ export default function TransactionHistory({ transactionHistory = [] }: Transact
         />
       </form>
       <div className="mt-3 overflow-auto rounded-xl border border-slate-300 bg-white">
-        <table className="w-full min-w-[800px] border-collapse">
+        <table className="w-full min-w-[800px] table-fixed border-collapse">
           <thead>
             <tr className="bg-slate-50 text-slate-500">
-              <th className="border-b border-slate-300 p-2 text-left text-xs">Ticker</th>
-              <th className="border-b border-slate-300 p-2 text-left text-xs">Type</th>
-              <th className="border-b border-slate-300 p-2 text-left text-xs">Lot Done</th>
-              <th className="border-b border-slate-300 p-2 text-left text-xs">Amount Done</th>
-              <th className="border-b border-slate-300 p-2 text-left text-xs">Broker</th>
-              <th className="border-b border-slate-300 p-2 text-left text-xs">Date</th>
+              <th className="w-[15%] border-b border-slate-300 p-4 text-left text-xs">
+                Ordered Items
+              </th>
+              <th className="w-[10%] border-b border-slate-300 p-4 text-left text-xs">
+                Lot Done
+              </th>
+              <th className="w-[10%] border-b border-slate-300 p-4 text-left text-xs">
+                Price
+              </th>
+              <th className="w-[14%] border-b border-slate-300 p-4 text-left text-xs">
+                Amount Done
+              </th>
+              <th className="w-[11%] border-b border-slate-300 p-4 text-left text-xs">
+                Total Fee
+              </th>
+              <th className="w-[12%] border-b border-slate-300 p-4 text-left text-xs">
+                Net Amount
+              </th>
+              <th className="w-[10%] border-b border-slate-300 p-4 text-left text-xs">
+                Date
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -43,7 +58,7 @@ export default function TransactionHistory({ transactionHistory = [] }: Transact
             ) : (
               transactionHistory.map((transaction) => (
                 <tr key={transaction.id}>
-                  <td className="border-b border-slate-100 p-2 text-sm font-semibold">
+                  <td className="border-b border-slate-100 p-4 text-sm font-semibold">
                     {transaction.stock.ticker}
                   </td>
                   <td className="border-b border-slate-100 p-2 text-sm">{transaction.type}</td>

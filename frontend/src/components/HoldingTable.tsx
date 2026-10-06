@@ -1,4 +1,4 @@
-import { formatCurrency, formatNumber } from '../lib/formatters'
+  import { formatCurrency, formatNumber } from '../lib/formatters'
 import type { Holding } from '../types'
 
 interface HoldingTableProps {
@@ -11,16 +11,17 @@ export default function HoldingTable({ holdings = [] }: HoldingTableProps) {
       <table className="w-full min-w-[620px] border-collapse">
         <thead>
           <tr className="bg-slate-50 text-slate-500">
-            <th className="border-b border-slate-300 p-2 text-left text-xs">Ticker</th>
-            <th className="border-b border-slate-300 p-2 text-left text-xs">Lot</th>
-            <th className="border-b border-slate-300 p-2 text-left text-xs">Avg Price</th>
-            <th className="border-b border-slate-300 p-2 text-left text-xs">Broker</th>
+            <th className="w-[12%] border-b border-slate-300 p-2 text-center text-xs">Ticker</th>
+            <th className="w-[12%] border-b border-slate-300 p-2 text-center text-xs">Market Value</th>
+            <th className="w-[12%] border-b border-slate-300 p-2 text-center text-xs">Sector</th>
+            <th className="w-[12%] border-b border-slate-300 p-2 text-center text-xs">Broker</th>
+            <th className="w-[12%] border-b border-slate-300 p-2 text-center text-xs">Weight (%)</th>
           </tr>
         </thead>
         <tbody>
           {!holdings || holdings.length === 0 ? (
             <tr>
-              <td colSpan={4} className="p-4 text-center text-sm text-slate-500">
+              <td colSpan={6} className="p-2 text-center text-sm text-slate-500">
                 Pilih broker untuk melihat holding.
               </td>
             </tr>
@@ -31,12 +32,15 @@ export default function HoldingTable({ holdings = [] }: HoldingTableProps) {
                   {holding.ticker}
                 </td>
                 <td className="border-b border-slate-100 p-2 text-sm">
-                  {formatNumber(holding.lot, 0)}
+                  {/*Market Value*/}
                 </td>
                 <td className="border-b border-slate-100 p-2 text-sm">
-                  {formatCurrency(holding.avg_price)}
+                  {/*Sector*/}
                 </td>
                 <td className="border-b border-slate-100 text-sm">{holding.broker_name}</td>
+                <td>
+                  {/*Weight %*/}
+                </td>
               </tr>
             ))
           )}
