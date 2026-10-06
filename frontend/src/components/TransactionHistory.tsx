@@ -51,7 +51,7 @@ export default function TransactionHistory({ transactionHistory = [] }: Transact
           <tbody>
             {transactionHistory.length === 0 ? (
               <tr>
-                <td colSpan={6} className="p-3 text-sm text-center text-slate-500">
+                <td colSpan={7} className="p-2 text-sm text-center text-slate-500">
                   Tidak ada data transaksi.
                 </td>
               </tr>
