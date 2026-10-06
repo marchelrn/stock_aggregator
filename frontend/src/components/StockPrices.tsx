@@ -73,18 +73,18 @@ export default function StockPrices({ prices = {}, onFetch, onClear }: StockPric
         <table className="w-full min-w-[560px] border-collapse">
           <thead>
             <tr className="bg-slate-50 text-slate-500">
-              <th className="border-b border-slate-300 p-5 text-left text-xs">Ticker</th>
-              <th className="border-b border-slate-300 p-2 text-left text-xs">Price</th>
-              <th className="border-b border-slate-300 p-2 text-left text-xs">Prev Close</th>
-              <th className="border-b border-slate-300 p-2 text-left text-xs">Change</th>
-              <th className="border-b border-slate-300 p-2 text-left text-xs">Change %</th>
-              <th className="border-b border-slate-300 p-2 text-left text-xs">Currency</th>
+              <th className="border-b border-slate-300 p-2 text-center text-xs">Ticker</th>
+              <th className="border-b border-slate-300 p-2 text-center text-xs">Price</th>
+              <th className="border-b border-slate-300 p-2 text-center text-xs">Prev Close</th>
+              <th className="border-b border-slate-300 p-2 text-center text-xs">Change</th>
+              <th className="border-b border-slate-300 p-2 text-center text-xs">Change %</th>
+              <th className="border-b border-slate-300 p-2 text-center text-xs">Currency</th>
             </tr>
           </thead>
           <tbody>
             {sortedEntries.length === 0 ? (
               <tr>
-                <td colSpan={6} className="p-3 text-sm text-slate-500">
+                <td colSpan={6} className="p-2 text-sm text-center text-slate-500">
                   Tidak ada data harga.
                 </td>
               </tr>
