@@ -83,6 +83,16 @@ export default function BrokersPage() {
     if (success) setBrokerToRemove(null)
   }
 
+  // Bobot alokasi per broker (% dari total portofolio) dari summary yang sama
+  // dengan yang dipakai Dashboard, sehingga angkanya konsisten antar halaman.
+  const brokerAllocations = useMemo(() => {
+    const map: Record<number, number> = {}
+    state.summary?.brokers.forEach((b) => {
+      map[b.id] = b.weight
+    })
+    return map
+  }, [state.summary])
+
   const filteredHoldings = useMemo(() => {
     if (selectedBrokerIds.length === 0) return []
     return state.holdings.filter((h) => selectedBrokerIds.includes(Number(h.broker_id)))
@@ -157,6 +167,7 @@ export default function BrokersPage() {
           <BrokerTable
             brokers={state.brokers}
             selectedBrokerIds={selectedBrokerIds}
+            allocations={brokerAllocations}
             onToggle={handleToggleBroker}
             onRemove={setBrokerToRemove}
           />

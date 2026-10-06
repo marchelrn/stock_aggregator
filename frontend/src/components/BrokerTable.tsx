@@ -1,10 +1,11 @@
-import { formatCurrency } from '../lib/formatters'
+import { formatCurrency, formatNumber } from '../lib/formatters'
 import { X } from 'lucide-react'
 import type { Broker } from '../types'
 
 interface BrokerTableProps {
   brokers?: Broker[]
   selectedBrokerIds?: number[]
+  allocations?: Record<number, number>
   onToggle?: (id: number) => void
   onRemove?: (broker: Broker) => void
 }
@@ -12,6 +13,7 @@ interface BrokerTableProps {
 export default function BrokerTable({
   brokers = [],
   selectedBrokerIds = [],
+  allocations = {},
   onToggle,
   onRemove,
 }: BrokerTableProps) {
@@ -32,7 +34,7 @@ export default function BrokerTable({
         <tbody>
           {!brokers || brokers.length === 0 ? (
             <tr>
-              <td colSpan={5} className="p-3 text-sm text-slate-500">
+              <td colSpan={6} className="p-3 text-sm text-slate-500">
                 Belum ada broker.
               </td>
             </tr>
@@ -46,8 +48,8 @@ export default function BrokerTable({
                 <td className="border-b border-slate-100 p-2 text-sm text-center">
                   {formatCurrency(broker.cash)}
                 </td>
-                <td>
-                  {/*Brokers Allocations*/}
+                <td className="border-b border-slate-100 p-2 text-sm text-center">
+                  {formatNumber(allocations[broker.id] ?? 0, 1)}%
                 </td>
                 <td className="border-b border-slate-100 p-2 text-sm text-center">
                   <label className={`relative inline-flex cursor-pointer items-center ${isOnlyBroker ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
