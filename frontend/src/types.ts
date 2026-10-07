@@ -13,6 +13,7 @@ export interface Holding {
   avg_price: number
   broker_id: number
   broker_name: string
+  sector?: string | null
 }
 
 export interface StockPrice {
