@@ -109,6 +109,7 @@ func SetupRoutes(s *contract.Service) *gin.Engine {
 	protected := r.Group("/api")
 	protected.Use(middleware.JWTAuth())
 	{
+		protected.GET("/market/:ticker", yahooController.GetMarket)
 		// Gmail sync routes
 		protected.POST("/gmail/sync", gmailController.SyncTradeConfirmations)
 		protected.GET("/gmail/status", gmailController.GetSyncStatus)

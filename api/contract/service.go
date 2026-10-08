@@ -1,6 +1,8 @@
 package contract
 
 import (
+	"context"
+
 	"github.com/marchelrn/stock_api/dto"
 	"github.com/marchelrn/stock_api/models"
 )
@@ -54,6 +56,7 @@ type TransactionService interface {
 }
 
 type YahooService interface {
+	GetMarket(ctx context.Context, ticker string) (*dto.MarketResponse, error)
 	GetPrice(ticker string) (*models.StockPrice, error)
 	GetPrices(tickers []string) (prices map[string]*models.StockPrice, failed map[string]string, err error)
 	GetAllPrices() ([]models.StockPrice, error)

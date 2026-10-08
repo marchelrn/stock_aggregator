@@ -76,6 +76,43 @@ DB_NAME=stock_api
 | `DELETE` | `/broker/:name` | Delete broker (supports comma-separated) |
 | `POST` | `/broker/transfer-cash` | Transfer cash between brokers |
 
+### Market data (Yahoo Finance)
+
+`GET /api/market/:ticker` requires `Authorization: Bearer <JWT>` through the existing `/api` authentication middleware. Lowercase tickers are uppercased; the resulting ticker must match `[A-Z0-9]{1,12}` without `.JK` or surrounding whitespace.
+
+The endpoint requests Yahoo's free chart API at `/v8/finance/chart/{ticker}.JK?range=1mo&interval=1d`. Successful results are cached in memory for five minutes, with at most 256 entries per service instance; failures are never cached. No database writes or migrations are required. Yahoo data may be delayed.
+
+**Success (`200 OK`)** — illustrative values:
+
+```json
+{
+  "data": {
+    "ticker": "BBCA",
+    "name": "Bank Central Asia",
+    "currency": "IDR",
+    "exchange": "Jakarta",
+    "price": 110,
+    "previous_close": 100,
+    "change": 10,
+    "change_percent": 10,
+    "day_high": null,
+    "day_low": 100,
+    "fifty_two_week_high": 120,
+    "fifty_two_week_low": null,
+    "volume": 0,
+    "market_time": 1704276000,
+    "fetched_at": "2026-10-08T00:00:00Z",
+    "history": [{"time": 1704276000, "close": 110}]
+  }
+}
+```
+
+All fields are always present. Unavailable numeric fields are `null`, not zero. `name`, `currency`, and `exchange` are strings (empty if unavailable). `volume` and `market_time` are nullable integers; `market_time` and history `time` are Unix seconds. `fetched_at` is a UTC RFC 3339 / ISO 8601 timestamp and stays unchanged on cache hits. History is a chronological array of daily closes for the requested month; missing/nonfinite closes and missing timestamps are skipped, and absent history is `[]`.
+
+`previous_close` uses Yahoo's `previousClose`, or the last valid daily close before the quote's exchange-local date when available. It does not use `chartPreviousClose`, which is the start-of-range close. `change = price - previous_close`; `change_percent = change / previous_close * 100` (null when unavailable or the previous close is zero).
+
+**Errors:** invalid ticker `400`; missing/invalid JWT `401` via existing middleware; Yahoo not found `404`; Yahoo rate limit `429`; upstream HTTP/network errors or malformed/oversized responses `502`; upstream timeout `504`. Service errors use the existing `{"status_code": 429, "message": "Yahoo chart returned HTTP 429"}` envelope. Requests have a 10-second HTTP client timeout and successful response bodies are limited to 2 MiB.
+
 ### Transaction
 
 | Method | Endpoint           | Description                              |

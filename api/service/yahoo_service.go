@@ -18,11 +18,18 @@ import (
 
 type YahooService struct {
 	YahooRepository contract.YahooRepository
+	marketClient    *http.Client
+	marketBaseURL   string
+	marketMu        sync.Mutex
+	marketCache     map[string]cachedMarket
 }
 
 func ImplYahooService(repo contract.YahooRepository) contract.YahooService {
 	return &YahooService{
 		YahooRepository: repo,
+		marketClient:    &http.Client{Timeout: 10 * time.Second},
+		marketBaseURL:   "https://query1.finance.yahoo.com",
+		marketCache:     make(map[string]cachedMarket),
 	}
 }
 
