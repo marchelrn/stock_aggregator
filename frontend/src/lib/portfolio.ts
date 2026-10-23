@@ -24,7 +24,7 @@ export function normalizeArray<T = any>(res: any): T[] {
   if (Array.isArray(res?.brokers_data?.brokers)) return res.brokers_data.brokers
 
   return []
-}
+ }
 
 export function buildSummary(
   brokers: Broker[] = [],
