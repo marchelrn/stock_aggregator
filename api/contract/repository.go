@@ -1,6 +1,8 @@
 package contract
 
 import (
+	"context"
+
 	"github.com/marchelrn/stock_api/models"
 )
 
@@ -10,6 +12,11 @@ type Repository struct {
 	Transactions TransactionRepository
 	Yahoo        YahooRepository
 	Auth         AuthRepository
+	PDFTemplates PDFTemplateRepository
+}
+
+type PDFTemplateRepository interface {
+	ListActive(context.Context) ([]models.PDFParsingTemplate, error)
 }
 
 type AuthRepository interface {

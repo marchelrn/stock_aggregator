@@ -8,3 +8,21 @@ Stocks/
 database_backup/
 .gmail_token.json
 Stocks.zip
+# Private PDF fixtures, ground truth and generated research reports
+/testing/
+
+# Local build outputs
+*.exe
+*.test
+/test_gmail_sync
+/test_tc_research
+
+# Generated email/transaction exports (keep local, never commit)
+/email_debug.csv
+/trade_results.csv
+
+# Local environment overrides; retain a sanitized example
+.env.*
+!.env.example
+__pycache__/
+*.pyc

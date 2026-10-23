@@ -13,5 +13,6 @@ func New(db *gorm.DB) *contract.Repository {
 		Transactions: ImplTransactionRepository(db),
 		Yahoo:        ImplYahooRepository(db),
 		Auth:         ImplAuthRepository(db),
+		PDFTemplates: ImplPDFTemplateRepository(db),
 	}
 }

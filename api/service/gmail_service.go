@@ -3,9 +3,11 @@ package service
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/marchelrn/stock_api/dto"
 	"github.com/marchelrn/stock_api/models"
 	errs "github.com/marchelrn/stock_api/pkg/error"
+	"github.com/marchelrn/stock_api/service/parser"
 	"github.com/marchelrn/stock_api/utils"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/gmail/v1"
@@ -31,6 +34,18 @@ type TradeConfirmationParser interface {
 	BrokerName() string
 }
 
+// emailTradeConfirmationParser is optional so existing injected parsers remain compatible.
+// A metadata parser failure must never fall back to Parse and bypass email matching.
+type emailTradeConfirmationParser interface {
+	ParseEmail(context.Context, []byte, parser.EmailMetadata) ([]dto.ParsedTrade, error)
+}
+
+type emailSelectorProvider interface {
+	EmailSelectors(context.Context) ([]parser.EmailMetadata, error)
+}
+
+const gmailSyncTimeout = 2 * time.Minute
+
 func ImplGmailService(authRepo contract.AuthRepository, parser TradeConfirmationParser) contract.GmailService {
 	return &GmailServiceImpl{
 		AuthRepository: authRepo,
@@ -39,7 +54,7 @@ func ImplGmailService(authRepo contract.AuthRepository, parser TradeConfirmation
 }
 
 // getGmailClient creates a Gmail API client using the user's stored OAuth tokens
-func (s *GmailServiceImpl) getGmailClient(user *models.Users) (*gmail.Service, error) {
+func (s *GmailServiceImpl) getGmailClient(ctx context.Context, user *models.Users) (*gmail.Service, error) {
 	cfg := config.GetConfig()
 
 	if user.GmailRefreshToken == nil {
@@ -73,22 +88,30 @@ func (s *GmailServiceImpl) getGmailClient(user *models.Users) (*gmail.Service, e
 		TokenType:    "Bearer",
 	}
 
-	client := cfg.GoogleOAuthConfig.Client(context.Background(), token)
-
-	// If token was refreshed, update in database
-	newToken, err := cfg.GoogleOAuthConfig.TokenSource(context.Background(), token).Token()
-	if err == nil && newToken.AccessToken != token.AccessToken {
-		encAccessToken, encErr := utils.Encrypt(newToken.AccessToken, cfg.EncryptionKey)
-		if encErr == nil {
-			user.GmailAccessToken = &encAccessToken
-			user.GmailTokenExpiry = &newToken.Expiry
-			if _, updateErr := s.AuthRepository.UpdateUser(user); updateErr != nil {
-				log.Printf("Warning: failed to update refreshed token: %v", updateErr)
-			}
-		}
+	// Reuse one token source so the initial refresh and subsequent requests share
+	// the request deadline and do not independently refresh the same token.
+	tokenSource := cfg.GoogleOAuthConfig.TokenSource(ctx, token)
+	newToken, err := tokenSource.Token()
+	if err != nil {
+		return nil, fmt.Errorf("refresh Gmail token: %w", err)
 	}
+	if newToken.AccessToken != token.AccessToken {
+		encAccessToken, err := utils.Encrypt(newToken.AccessToken, cfg.EncryptionKey)
+		if err != nil {
+			return nil, fmt.Errorf("encrypt Gmail token: %w", err)
+		}
+		updated := *user
+		updated.GmailAccessToken = &encAccessToken
+		updated.GmailTokenExpiry = &newToken.Expiry
+		if _, err := s.AuthRepository.UpdateUser(&updated); err != nil {
+			return nil, fmt.Errorf("save refreshed Gmail token: %w", err)
+		}
+		*user = updated
+	}
+	client := oauth2.NewClient(ctx, tokenSource)
+	client.Timeout = gmailSyncTimeout
 
-	srv, err := gmail.NewService(context.Background(), option.WithHTTPClient(client))
+	srv, err := gmail.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
 		return nil, errs.InternalServerError("Gagal membuat Gmail client: " + err.Error())
 	}
@@ -97,6 +120,15 @@ func (s *GmailServiceImpl) getGmailClient(user *models.Users) (*gmail.Service, e
 }
 
 func (s *GmailServiceImpl) SyncTradeConfirmations(userID uint) (*dto.GmailSyncResponse, error) {
+	return s.SyncTradeConfirmationsContext(context.Background(), userID)
+}
+
+// SyncTradeConfirmationsContext allows callers to cancel Gmail and token refresh requests.
+func (s *GmailServiceImpl) SyncTradeConfirmationsContext(ctx context.Context, userID uint) (*dto.GmailSyncResponse, error) {
+	startedAt := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, gmailSyncTimeout)
+	defer cancel()
+
 	// Find user
 	user, err := s.AuthRepository.FindByID(userID)
 	if err != nil {
@@ -108,60 +140,70 @@ func (s *GmailServiceImpl) SyncTradeConfirmations(userID uint) (*dto.GmailSyncRe
 	}
 
 	// Create Gmail client
-	gmailSrv, err := s.getGmailClient(user)
+	gmailSrv, err := s.getGmailClient(ctx, user)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build search query for trade confirmation emails
-	// Mandiri Sekuritas typically sends from specific addresses
-	query := buildTradeConfirmationQuery(user.LastGmailSyncAt)
+	return s.syncTradeConfirmations(ctx, gmailSrv, user, startedAt)
+}
 
-	log.Printf("Searching Gmail with query: %s", query)
-
-	// Search for emails
-	messages, err := gmailSrv.Users.Messages.List("me").Q(query).MaxResults(50).Do()
+func (s *GmailServiceImpl) syncTradeConfirmations(ctx context.Context, gmailSrv *gmail.Service, user *models.Users, startedAt time.Time) (*dto.GmailSyncResponse, error) {
+	query, err := s.tradeConfirmationQuery(ctx, user.LastGmailSyncAt)
 	if err != nil {
-		return nil, errs.InternalServerError("Gagal mencari email: " + err.Error())
+		return nil, err
 	}
-
-	if len(messages.Messages) == 0 {
-		now := time.Now()
-		user.LastGmailSyncAt = &now
-		s.AuthRepository.UpdateUser(user)
-
-		return &dto.GmailSyncResponse{
-			StatusCode:   http.StatusOK,
-			Message:      "Tidak ada email trade confirmation baru ditemukan",
-			TradesFound:  0,
-			TradesSynced: 0,
-		}, nil
-	}
-
 	var allTrades []dto.ParsedTrade
-
-	for _, msg := range messages.Messages {
-		fullMsg, err := gmailSrv.Users.Messages.Get("me", msg.Id).Do()
+	var emailCount int
+	pageToken := ""
+	for {
+		messages, err := gmailSrv.Users.Messages.List("me").Q(query).MaxResults(50).PageToken(pageToken).Context(ctx).Do()
 		if err != nil {
-			log.Printf("Warning: gagal mengambil email %s: %v", msg.Id, err)
-			continue
+			return nil, fmt.Errorf("search Gmail messages: %w", err)
 		}
-
-		// Look for PDF attachments
-		trades := s.processMessageAttachments(gmailSrv, fullMsg)
-		allTrades = append(allTrades, trades...)
+		for _, msg := range messages.Messages {
+			if msg == nil || msg.Id == "" {
+				return nil, fmt.Errorf("Gmail search returned a message without an ID")
+			}
+			fullMsg, err := gmailSrv.Users.Messages.Get("me", msg.Id).Format("full").Context(ctx).Do()
+			if err != nil {
+				return nil, fmt.Errorf("get Gmail message %s: %w", msg.Id, err)
+			}
+			trades, err := s.processMessageAttachments(ctx, gmailSrv, fullMsg)
+			if err != nil {
+				return nil, fmt.Errorf("process Gmail message %s: %w", msg.Id, err)
+			}
+			allTrades = append(allTrades, trades...)
+			emailCount++
+		}
+		pageToken = messages.NextPageToken
+		if pageToken == "" {
+			break
+		}
 	}
 
-	// Update last sync timestamp
-	now := time.Now()
-	user.LastGmailSyncAt = &now
-	s.AuthRepository.UpdateUser(user)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Save a copy so an unsuccessful repository update cannot advance the
+	// caller's checkpoint. Use the start time to retain mail arriving mid-sync.
+	updated := *user
+	updated.LastGmailSyncAt = &startedAt
+	if _, err := s.AuthRepository.UpdateUser(&updated); err != nil {
+		return nil, fmt.Errorf("save Gmail sync checkpoint: %w", err)
+	}
+	*user = updated
 
+	message := fmt.Sprintf("Berhasil parse %d trade dari %d email; belum disimpan", len(allTrades), emailCount)
+	if emailCount == 0 {
+		message = "Tidak ada email trade confirmation baru ditemukan"
+	}
 	return &dto.GmailSyncResponse{
-		StatusCode:   http.StatusOK,
-		Message:      fmt.Sprintf("Ditemukan %d trade dari %d email", len(allTrades), len(messages.Messages)),
-		TradesFound:  len(allTrades),
-		TradesSynced: len(allTrades),
+		StatusCode:  http.StatusOK,
+		Message:     message,
+		TradesFound: len(allTrades),
+		// Parsing does not persist transactions; do not report them as synced.
+		TradesSynced: 0,
 		ParsedTrades: allTrades,
 	}, nil
 }
@@ -180,11 +222,10 @@ func (s *GmailServiceImpl) GetSyncStatus(userID uint) (*dto.GmailSyncStatusRespo
 	}, nil
 }
 
-// buildTradeConfirmationQuery creates a Gmail search query for Mandiri Sekuritas trade confirmations
+// buildTradeConfirmationQuery discovers candidate messages; template selectors
+// are applied separately when parsing each attachment.
 func buildTradeConfirmationQuery(lastSyncAt *time.Time) string {
-	// Mandiri Sekuritas common sender patterns
 	parts := []string{
-		"subject:(trade confirmation OR konfirmasi transaksi OR contract note)",
 		"has:attachment",
 		"filename:pdf",
 	}
@@ -196,45 +237,132 @@ func buildTradeConfirmationQuery(lastSyncAt *time.Time) string {
 	return strings.Join(parts, " ")
 }
 
+func (s *GmailServiceImpl) tradeConfirmationQuery(ctx context.Context, lastSyncAt *time.Time) (string, error) {
+	query := buildTradeConfirmationQuery(lastSyncAt)
+	provider, ok := s.TradeParser.(emailSelectorProvider)
+	if !ok {
+		return query, nil
+	}
+	selectors, err := provider.EmailSelectors(ctx)
+	if err != nil {
+		return "", fmt.Errorf("load Gmail email selectors: %w", err)
+	}
+	if len(selectors) == 0 {
+		return "", fmt.Errorf("no active PDF email selectors")
+	}
+
+	var senders []string
+	wildcard := false
+	seen := make(map[string]bool)
+	for _, selector := range selectors {
+		if selector.From == "" {
+			wildcard = true
+			continue
+		}
+		// Validate even injected providers: only a bare mailbox may enter the
+		// quoted Gmail term, never display names, quotes, or query syntax.
+		address, err := mail.ParseAddress(selector.From)
+		if err != nil || address.Address != selector.From || strings.ContainsAny(selector.From, "\r\n\"\\") {
+			return "", fmt.Errorf("invalid Gmail selector sender %q", selector.From)
+		}
+		key := strings.ToLower(selector.From)
+		if !seen[key] {
+			senders = append(senders, fmt.Sprintf("from:\"%s\"", selector.From))
+			seen[key] = true
+		}
+	}
+	// Gmail token matching cannot safely express subject substrings or filename
+	// suffixes. ParseEmail applies those selectors locally to every candidate.
+	if !wildcard {
+		query += " {" + strings.Join(senders, " ") + "}"
+	}
+	return query, nil
+}
+
 // processMessageAttachments downloads and parses PDF attachments from a Gmail message
-func (s *GmailServiceImpl) processMessageAttachments(gmailSrv *gmail.Service, msg *gmail.Message) []dto.ParsedTrade {
+func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailSrv *gmail.Service, msg *gmail.Message) ([]dto.ParsedTrade, error) {
+	if msg == nil || msg.Payload == nil {
+		return nil, fmt.Errorf("Gmail message has no MIME payload")
+	}
+	meta := parser.EmailMetadata{}
+	for _, header := range msg.Payload.Headers {
+		if header == nil {
+			continue
+		}
+		switch {
+		case strings.EqualFold(header.Name, "From"):
+			meta.From = header.Value
+		case strings.EqualFold(header.Name, "Subject"):
+			meta.Subject = header.Value
+		}
+	}
+
 	var trades []dto.ParsedTrade
-
-	if msg.Payload == nil {
-		return trades
+	foundPDF := false
+	var visit func(*gmail.MessagePart) error
+	visit = func(part *gmail.MessagePart) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if part == nil {
+			return nil
+		}
+		if strings.HasSuffix(strings.ToLower(part.Filename), ".pdf") || strings.EqualFold(part.MimeType, "application/pdf") {
+			foundPDF = true
+			if part.Body == nil {
+				return fmt.Errorf("PDF %q has no body", part.Filename)
+			}
+			data := part.Body.Data
+			if data == "" && part.Body.AttachmentId != "" {
+				attachment, err := gmailSrv.Users.Messages.Attachments.Get("me", msg.Id, part.Body.AttachmentId).Context(ctx).Do()
+				if err != nil {
+					return fmt.Errorf("download PDF %q: %w", part.Filename, err)
+				}
+				data = attachment.Data
+			}
+			if data == "" {
+				return fmt.Errorf("PDF %q has no data", part.Filename)
+			}
+			pdfBytes, err := base64.URLEncoding.DecodeString(data)
+			if err != nil {
+				pdfBytes, err = base64.RawURLEncoding.DecodeString(data)
+			}
+			if err != nil {
+				return fmt.Errorf("decode PDF %q: %w", part.Filename, err)
+			}
+			if s.TradeParser == nil {
+				return fmt.Errorf("trade confirmation parser is not configured")
+			}
+			var parsed []dto.ParsedTrade
+			if emailParser, ok := s.TradeParser.(emailTradeConfirmationParser); ok {
+				meta.Filename = part.Filename
+				parsed, err = emailParser.ParseEmail(ctx, pdfBytes, meta)
+			} else {
+				parsed, err = s.TradeParser.Parse(pdfBytes)
+			}
+			switch {
+			case errors.Is(err, parser.ErrEmailNotApplicable):
+				// An unrelated PDF is not a failed parse; keep visiting siblings.
+			case err != nil:
+				return fmt.Errorf("parse PDF %q: %w", part.Filename, err)
+			case len(parsed) == 0:
+				return fmt.Errorf("parse PDF %q: no trades found", part.Filename)
+			default:
+				trades = append(trades, parsed...)
+			}
+		}
+		for _, child := range part.Parts {
+			if err := visit(child); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
-
-	// Check all parts for PDF attachments
-	for _, part := range msg.Payload.Parts {
-		if part.Filename == "" || !strings.HasSuffix(strings.ToLower(part.Filename), ".pdf") {
-			continue
-		}
-
-		log.Printf("Found PDF attachment: %s in message %s", part.Filename, msg.Id)
-
-		// Download attachment
-		attachment, err := gmailSrv.Users.Messages.Attachments.Get("me", msg.Id, part.Body.AttachmentId).Do()
-		if err != nil {
-			log.Printf("Warning: gagal download attachment %s: %v", part.Filename, err)
-			continue
-		}
-
-		// Decode base64 attachment data
-		pdfBytes, err := base64.URLEncoding.DecodeString(attachment.Data)
-		if err != nil {
-			log.Printf("Warning: gagal decode attachment %s: %v", part.Filename, err)
-			continue
-		}
-
-		// Parse the PDF
-		parsedTrades, err := s.TradeParser.Parse(pdfBytes)
-		if err != nil {
-			log.Printf("Warning: gagal parse PDF %s: %v", part.Filename, err)
-			continue
-		}
-
-		trades = append(trades, parsedTrades...)
+	if err := visit(msg.Payload); err != nil {
+		return nil, err
 	}
-
-	return trades
+	if !foundPDF {
+		return nil, fmt.Errorf("Gmail message contains no PDF trades")
+	}
+	return trades, nil
 }

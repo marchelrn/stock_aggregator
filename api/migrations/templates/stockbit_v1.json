@@ -1,0 +1,33 @@
+{
+  "$schema": "./pdf_parsing_config.schema.json",
+  "schema_version": 1,
+  "required_markers": [
+    "STOCKBIT SEKURITAS DIGITAL",
+    "Trade Confirmation",
+    "REF #\\s+Board\\s+Share\\s+Lot\\s+Quantity\\s+Price\\s+Buy\\s+Sell"
+  ],
+  "date": {
+    "pattern": "Transaction Date\\s*\\n([^\\r\\n]+)",
+    "group": 1,
+    "layout": "02/01/2006"
+  },
+  "table": {
+    "start_pattern": "REF #\\s+Board\\s+Share\\s+Lot\\s+Quantity\\s+Price\\s+Buy\\s+Sell[ \\t]*\\r?\\n",
+    "end_pattern": "Your RDN Details:",
+    "row_pattern": "(?m)^([0-9]{5,})[ \\t]*\\r?\\n(RG|NG|TN|UH)[ \\t]*\\r?\\n([A-Z]{4})[ \\t]+[^\\r\\n]+\\r?\\n([^\\s]+)[ \\t]*\\r?\\n([^\\s]+)[ \\t]*\\r?\\n([^\\s]+)[ \\t]*\\r?\\n([^\\s]+)[ \\t]*\\r?\\n([^\\s]+)[ \\t]*(?:\\r?\\n|$)",
+    "fields": {
+      "ticker": 3,
+      "lot": 4,
+      "quantity": 5,
+      "price": 6,
+      "buy_amount": 7,
+      "sell_amount": 8
+    }
+  },
+  "numbers": {
+    "decimal_separator": ".",
+    "thousands_separator": ",",
+    "grouping_size": 3
+  },
+  "shares_per_lot": 100
+}
