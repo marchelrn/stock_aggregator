@@ -26,3 +26,4 @@ Stocks.zip
 !.env.example
 __pycache__/
 *.pyc
+.claude/
