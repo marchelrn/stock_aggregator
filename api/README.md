@@ -385,3 +385,7 @@ backend/
 
 - **100 requests per minute** per IP
 - Returns `429 Too Many Requests` when exceeded
+
+## App Version
+
+1.0.0
