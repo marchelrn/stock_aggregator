@@ -25,19 +25,19 @@ export default function TransactionHistory({ transactionHistory = [] }: Transact
         <table className="w-full min-w-[700px] table-fixed border-collapse">
           <thead>
             <tr className="bg-slate-50 text-slate-500">
-              <th className="w-[24%] border-b border-slate-300 p-4 text-left text-xs">
+              <th className="border-b border-slate-300 p-4 text-center text-xs">
                 Ticker / Broker
               </th>
-              <th className="w-[8%] border-b border-slate-300 p-4 text-left text-xs">
+              <th className="border-b border-slate-300 p-4 text-center text-xs">
                 Lot
               </th>
-              <th className="w-[12%] border-b border-slate-300 p-4 text-left text-xs">
+              <th className="border-b border-slate-300 p-4 text-center text-xs">
                 Est. Price
               </th>
-              <th className="w-[16%] border-b border-slate-300 p-4 text-left text-xs">
+              <th className="border-b border-slate-300 p-4 text-center text-xs">
                 Amount Done
               </th>
-              <th className="w-[20%] border-b border-slate-300 p-4 text-left text-xs">
+              <th className="border-b border-slate-300 p-4 text-center text-xs">
                 Date / Type
               </th>
             </tr>
@@ -55,29 +55,31 @@ export default function TransactionHistory({ transactionHistory = [] }: Transact
                 const estPrice = shares > 0 ? transaction.amount_done / shares : 0
                 return (
                   <tr key={transaction.id}>
-                    <td className="border-b border-slate-100 p-4">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">{transaction.stock.ticker}</span>
-                        <span
-                          className={`px-2 py-0.5 rounded text-xs font-semibold ${transaction.type === 'BUY' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}
-                        >
-                          {transaction.type}
-                        </span>
-                      </div>
-                      <div className="text-xs text-slate-500 mt-0.5">
-                        {transaction.broker.name}
+                    <td className="border-b border-slate-100 p-3 text-center">
+                      <div className="flex flex-col items-center gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">{transaction.stock.ticker}</span>
+                          <span
+                            className={`px-2 py-0.5 rounded text-xs font-semibold  ${transaction.type === 'BUY' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}
+                          >
+                            {transaction.type}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {transaction.broker.name}
+                        </div>
                       </div>
                     </td>
-                    <td className="border-b border-slate-100 p-2 text-sm">
+                    <td className="border-b border-slate-100 p-2 text-sm text-center">
                       {formatNumber(transaction.stock.lot, 0)}
                     </td>
-                    <td className="border-b border-slate-100 p-2 text-sm">
+                    <td className="border-b border-slate-100 p-2 text-sm text-center">
                       {formatCurrency(estPrice)}
                     </td>
-                    <td className="border-b border-slate-100 p-2 text-sm">
+                    <td className="border-b border-slate-100 p-2 text-sm text-center">
                       {formatCurrency(transaction.amount_done)}
                     </td>
-                    <td className="border-b border-slate-100 p-2 text-sm">
+                    <td className="border-b border-slate-100 p-2 text-sm text-center">
                       {transaction.date}
                     </td>
                   </tr>
