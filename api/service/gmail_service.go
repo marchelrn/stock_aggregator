@@ -226,12 +226,15 @@ func (s *GmailServiceImpl) GetSyncStatus(userID uint) (*dto.GmailSyncStatusRespo
 // are applied separately when parsing each attachment.
 func buildTradeConfirmationQuery(lastSyncAt *time.Time) string {
 	parts := []string{
+		`subject:("trade confirmation" OR "konfirmasi transaksi" OR "contract note")`,
 		"has:attachment",
 		"filename:pdf",
 	}
 
 	if lastSyncAt != nil {
-		parts = append(parts, fmt.Sprintf("after:%s", lastSyncAt.Format("2006/01/02")))
+		// Subtract 1 day to be safe against timezone differences (WITA vs UTC)
+		safeDate := lastSyncAt.AddDate(0, 0, -1)
+		parts = append(parts, fmt.Sprintf("after:%s", safeDate.Format("2006/01/02")))
 	}
 
 	return strings.Join(parts, " ")
@@ -252,11 +255,11 @@ func (s *GmailServiceImpl) tradeConfirmationQuery(ctx context.Context, lastSyncA
 	}
 
 	var senders []string
-	wildcard := false
 	seen := make(map[string]bool)
 	for _, selector := range selectors {
 		if selector.From == "" {
-			wildcard = true
+			// Skip selectors without a sender; they match any sender.
+			// Gmail query cannot express this, so rely on local ParseEmail filtering.
 			continue
 		}
 		// Validate even injected providers: only a bare mailbox may enter the
@@ -271,9 +274,8 @@ func (s *GmailServiceImpl) tradeConfirmationQuery(ctx context.Context, lastSyncA
 			seen[key] = true
 		}
 	}
-	// Gmail token matching cannot safely express subject substrings or filename
-	// suffixes. ParseEmail applies those selectors locally to every candidate.
-	if !wildcard {
+	// Add sender filters to query. If no senders configured, rely on subject+attachment query.
+	if len(senders) > 0 {
 		query += " {" + strings.Join(senders, " ") + "}"
 	}
 	return query, nil

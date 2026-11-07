@@ -236,7 +236,9 @@ func TestGmailSyncPaginationAndCheckpoint(t *testing.T) {
 	client := fakeGmail(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/messages") {
 			lists++
-			if r.URL.Query().Get("q") != "has:attachment filename:pdf after:"+previous.Format("2006/01/02") || r.URL.Query().Get("maxResults") != "50" {
+			wantDate := previous.AddDate(0, 0, -1).Format("2006/01/02")
+		wantQuery := "subject:(\"trade confirmation\" OR \"konfirmasi transaksi\" OR \"contract note\") has:attachment filename:pdf after:" + wantDate
+		if r.URL.Query().Get("q") != wantQuery || r.URL.Query().Get("maxResults") != "50" {
 				t.Errorf("unexpected search query: %s", r.URL)
 			}
 			response := &gmail.ListMessagesResponse{}
@@ -364,6 +366,10 @@ func TestGmailSyncNoMessagesAndUpdateError(t *testing.T) {
 
 func TestGmailSelectorDiscovery(t *testing.T) {
 	storeErr := errors.New("template store unavailable")
+	previous := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	// buildTradeConfirmationQuery subtracts 1 day for timezone safety
+	wantDate := "after:2026/09/30"
+	baseQuery := "subject:(\"trade confirmation\" OR \"konfirmasi transaksi\" OR \"contract note\") has:attachment filename:pdf " + wantDate
 	for _, tc := range []struct {
 		name       string
 		selectors  []parser.EmailMetadata
@@ -371,9 +377,9 @@ func TestGmailSelectorDiscovery(t *testing.T) {
 		wantSender string
 		wantErr    string
 	}{
-		{name: "wildcard sender", selectors: []parser.EmailMetadata{{Subject: "Execution Advice", Filename: "execution.pdf"}}},
+		{name: "wildcard sender", selectors: []parser.EmailMetadata{{Subject: "Execution Advice", Filename: "execution.pdf"}}, wantSender: ""},
 		{name: "sender union", selectors: []parser.EmailMetadata{{From: "broker@example.com", Subject: "Execution Advice", Filename: "execution.pdf"}, {From: "other@example.com"}}, wantSender: ` {from:"broker@example.com" from:"other@example.com"}`},
-		{name: "mixed wildcard", selectors: []parser.EmailMetadata{{From: "broker@example.com"}, {Subject: "Execution Advice", Filename: "execution.pdf"}}},
+		{name: "mixed wildcard", selectors: []parser.EmailMetadata{{From: "broker@example.com"}, {Subject: "Execution Advice", Filename: "execution.pdf"}}, wantSender: ` {from:"broker@example.com"}`},
 		{name: "duplicate sender", selectors: []parser.EmailMetadata{{From: "broker@example.com"}, {From: "broker@example.com"}}, wantSender: ` {from:"broker@example.com"}`},
 		{name: "no active", wantErr: "no active"},
 		{name: "store failure", storeErr: storeErr, wantErr: "template store unavailable"},
@@ -384,7 +390,6 @@ func TestGmailSelectorDiscovery(t *testing.T) {
 		{name: "invalid beside wildcard", selectors: []parser.EmailMetadata{{}, {From: "not a mailbox"}}, wantErr: "invalid Gmail selector sender"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			previous := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 			started := time.Now().Add(-time.Minute)
 			user := &models.Users{LastGmailSyncAt: &previous}
 			repo := &gmailAuthRepo{user: user}
@@ -403,7 +408,7 @@ func TestGmailSelectorDiscovery(t *testing.T) {
 				}
 				if strings.HasSuffix(r.URL.Path, "/messages") {
 					lists++
-					want := "has:attachment filename:pdf after:2026/10/01" + tc.wantSender
+					want := baseQuery + tc.wantSender
 					if got := r.URL.Query().Get("q"); got != want {
 						t.Errorf("query=%q; want %q", got, want)
 					}
