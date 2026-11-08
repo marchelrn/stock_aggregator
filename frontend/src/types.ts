@@ -87,7 +87,8 @@ export interface Transaction {
   type: string
   amount_done: number
   date: string
-  stock: { ticker: string; lot: number }
+  tax: number
+  stock: { ticker: string; lot: number; price?: number }
   broker: { name: string }
 }
 

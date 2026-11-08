@@ -2,8 +2,10 @@ package parser
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -57,205 +59,284 @@ func (p *StockbitParser) Parse(pdfBytes []byte) ([]dto.ParsedTrade, error) {
 	return p.parseContent(content)
 }
 
-// parseContent parses Stockbit trade confirmation format
-// Format:
-//
-//	REF #  Board  Share                   Lot  Quantity  Price     Buy          Sell
-//	0067289 RG    CDIA Chandra Daya...    6    600.00    705.00    423,000.00   0.00
-func (p *StockbitParser) parseContent(content string) ([]dto.ParsedTrade, error) {
-	var trades []dto.ParsedTrade
+func (p *StockbitParser) ParseEmail(ctx context.Context, data []byte, meta EmailMetadata) ([]dto.ParsedTrade, error) {
+	return p.Parse(data)
+}
 
-	// Extract transaction date
+func (p *StockbitParser) EmailSelectors(ctx context.Context) ([]EmailMetadata, error) {
+	return []EmailMetadata{
+		{From: "no-reply@stockbit.com", Subject: "Trade Confirmation"},
+	}, nil
+}
+
+type intermediateStockbitTrade struct {
+	RefNo  string
+	Ticker string
+	Lot    int
+	Price  float64
+	Type   string
+}
+
+type stockbitFeeSummary struct {
+	Commission float64
+	VATComm    float64
+	IDXFee     float64
+	VATLevy    float64
+	IncomeTax  float64
+	StampDuty  float64
+	TotalFee   float64
+	TotalCost  float64
+	TotalValue float64
+}
+
+// parseContent extracts trade details and fee/tax information from Stockbit trade confirmations
+func (p *StockbitParser) parseContent(content string) ([]dto.ParsedTrade, error) {
 	tradeDate := p.extractTradeDate(content)
 
 	lines := strings.Split(content, "\n")
-
-	// Find the table section after "REF #" header
-	inTradeTable := false
-
-	// Pattern to match Stockbit trade rows:
-	// REF#  Board  TICKER CompanyName  Lot  Quantity  Price  BuyAmount  SellAmount
-	// e.g.: "0067289  RG  CDIA Chandra Daya Investasi Tbk.  6  600.00  705.00  423,000.00  0.00"
-	tradeRowPattern := regexp.MustCompile(`^(\d{5,})\s+(RG|NG|TN|UH)\s+([A-Z]{4})\s+.+?\s+(\d+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)`)
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		if strings.Contains(line, "REF #") || strings.Contains(line, "REF#") {
-			inTradeTable = true
-			continue
-		}
-
-		// Stop at "Your RDN Details" or "Total Value"
-		if strings.Contains(line, "Your RDN") || strings.Contains(line, "Total Value") {
-			inTradeTable = false
-			continue
-		}
-
-		if !inTradeTable {
-			continue
-		}
-
-		matches := tradeRowPattern.FindStringSubmatch(line)
-		if matches != nil {
-			ticker := matches[3]
-			lot := parseStockbitNumber(matches[4])
-			price := parseStockbitFloat(matches[6])
-			buyAmount := parseStockbitFloat(matches[7])
-			sellAmount := parseStockbitFloat(matches[8])
-
-			var tradeType string
-			var amountDone float64
-			if buyAmount > 0 {
-				tradeType = "BUY"
-				amountDone = buyAmount
-			} else if sellAmount > 0 {
-				tradeType = "SELL"
-				amountDone = sellAmount
-			} else {
-				continue
-			}
-
-			trade := dto.ParsedTrade{
-				Ticker:     ticker,
-				Lot:        int(lot),
-				Price:      price,
-				Type:       tradeType,
-				Date:       tradeDate,
-				BrokerName: p.BrokerName(),
-				AmountDone: amountDone,
-			}
-
-			trades = append(trades, trade)
-			log.Printf("Stockbit parsed trade: %s %s %d lot @ %.2f = %.2f", tradeType, ticker, int(lot), price, amountDone)
-			continue
-		}
-
-		// Alternative: try multiline parsing where data is on separate lines
-		// Stockbit sometimes puts each field on its own line
-		// Look for pattern: TICKER CompanyName\n on one line, then numbers on subsequent lines
+	for i := range lines {
+		lines[i] = strings.TrimSpace(lines[i])
 	}
 
-	// If table pattern didn't work, try line-by-line parsing for Stockbit's
-	// multiline format where each field might be on a separate line
-	if len(trades) == 0 {
-		trades = p.parseMultilineFormat(lines, tradeDate)
+	rawTrades := p.extractTrades(lines)
+	if len(rawTrades) == 0 {
+		return nil, fmt.Errorf("tidak ada transaksi ditemukan pada PDF Stockbit")
+	}
+
+	buyFees, sellFees := p.extractSummaryFees(lines)
+
+	var totalBuyValue, totalSellValue float64
+	for _, t := range rawTrades {
+		gross := float64(t.Lot) * 100 * t.Price
+		if t.Type == "BUY" {
+			totalBuyValue += gross
+		} else {
+			totalSellValue += gross
+		}
+	}
+
+	var trades []dto.ParsedTrade
+	for _, t := range rawTrades {
+		gross := float64(t.Lot) * 100 * t.Price
+		var tax float64
+		if t.Type == "BUY" {
+			if totalBuyValue > 0 && buyFees.TotalFee > 0 {
+				tax = buyFees.TotalFee * (gross / totalBuyValue)
+			} else {
+				tax = gross * 0.0015
+			}
+		} else {
+			if totalSellValue > 0 && sellFees.TotalFee > 0 {
+				tax = sellFees.TotalFee * (gross / totalSellValue)
+			} else {
+				tax = gross * 0.0025
+			}
+		}
+
+		tax = math.Round(tax*100) / 100
+		amountDone := math.Round((gross+tax)*100) / 100
+
+		trade := dto.ParsedTrade{
+			Ticker:     t.Ticker,
+			Lot:        t.Lot,
+			Price:      t.Price,
+			Type:       t.Type,
+			Date:       tradeDate,
+			BrokerName: p.BrokerName(),
+			AmountDone: amountDone,
+			Tax:        tax,
+		}
+
+		trades = append(trades, trade)
+		log.Printf("Stockbit parsed trade: %s %s %d lot @ %.2f | Gross: %.2f | Tax: %.2f | AmountDone: %.2f",
+			trade.Type, trade.Ticker, trade.Lot, trade.Price, gross, trade.Tax, trade.AmountDone)
 	}
 
 	return trades, nil
 }
 
-// parseMultilineFormat handles Stockbit PDFs where fields are on separate lines
-// This happens when PDF text extraction puts each cell on its own line:
-//
-//	0067289
-//	RG
-//	CDIA Chandra Daya Investasi Tbk.
-//	6
-//	600.00
-//	705.00
-//	423,000.00
-//	0.00
-func (p *StockbitParser) parseMultilineFormat(lines []string, tradeDate time.Time) []dto.ParsedTrade {
-	var trades []dto.ParsedTrade
+func (p *StockbitParser) extractTrades(lines []string) []intermediateStockbitTrade {
+	var trades []intermediateStockbitTrade
 
-	// Find ticker lines (4 uppercase letters followed by company name)
-	tickerLinePattern := regexp.MustCompile(`^([A-Z]{4})\s+.+(?:Tbk\.|Ltd\.|Inc\.)`)
 	refPattern := regexp.MustCompile(`^\d{5,}$`)
+	boardPattern := regexp.MustCompile(`^(?:RG|NG|TN|UH)$`)
+	tickerLinePattern := regexp.MustCompile(`^([A-Z]{4})\s+`)
+	tradeRowSingleLine := regexp.MustCompile(`^(\d{5,})\s+(RG|NG|TN|UH)\s+([A-Z]{4})\s+.+?\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)$`)
 
+	startIdx := -1
+	endIdx := len(lines)
 	for i, line := range lines {
-		line = strings.TrimSpace(line)
-
-		matches := tickerLinePattern.FindStringSubmatch(line)
-		if matches == nil {
-			continue
+		if strings.Contains(line, "REF #") || strings.Contains(line, "REF#") {
+			startIdx = i
 		}
-
-		ticker := matches[1]
-
-		// Skip common non-ticker words
-		if isCommonWord(ticker) {
-			continue
+		if startIdx >= 0 && (strings.Contains(line, "Your RDN") || strings.Contains(line, "Total Value")) {
+			endIdx = i
+			break
 		}
+	}
+	if startIdx < 0 {
+		startIdx = 0
+	}
 
-		// Verify there's a REF # before this line (within 3 lines)
-		hasRef := false
-		for j := max(0, i-3); j < i; j++ {
-			if refPattern.MatchString(strings.TrimSpace(lines[j])) {
-				hasRef = true
-				break
+	i := startIdx
+	for i < endIdx {
+		line := lines[i]
+
+		// Format 1: Multi-line cells (PDF text extraction per cell)
+		if refPattern.MatchString(line) {
+			var block []string
+			for j := i; j < endIdx && j < i+12; j++ {
+				if lines[j] != "" {
+					block = append(block, lines[j])
+				}
+			}
+
+			// Expected order:
+			// 0: REF #
+			// 1: Board
+			// 2: Share (TICKER CompanyName)
+			// 3: Lot
+			// 4: Quantity
+			// 5: Price
+			// 6: Buy
+			// 7: Sell
+			if len(block) >= 8 && refPattern.MatchString(block[0]) && boardPattern.MatchString(block[1]) {
+				tMatch := tickerLinePattern.FindStringSubmatch(block[2])
+				if tMatch != nil {
+					ticker := tMatch[1]
+					lot := parseStockbitNumber(block[3])
+					price := parseStockbitFloat(block[5])
+					buyVal := parseStockbitFloat(block[6])
+					sellVal := parseStockbitFloat(block[7])
+
+					tradeType := ""
+					if buyVal > 0 && sellVal == 0 {
+						tradeType = "BUY"
+					} else if sellVal > 0 && buyVal == 0 {
+						tradeType = "SELL"
+					} else if buyVal > sellVal {
+						tradeType = "BUY"
+					} else if sellVal > 0 {
+						tradeType = "SELL"
+					}
+
+					if tradeType != "" && lot > 0 && price > 0 {
+						trades = append(trades, intermediateStockbitTrade{
+							RefNo:  block[0],
+							Ticker: ticker,
+							Lot:    int(lot),
+							Price:  price,
+							Type:   tradeType,
+						})
+						i += 8
+						continue
+					}
+				}
 			}
 		}
-		if !hasRef {
-			continue
-		}
 
-		// Look for numbers after the ticker line
-		var numbers []float64
-		for j := i + 1; j < min(len(lines), i+8); j++ {
-			nextLine := strings.TrimSpace(lines[j])
-			if nextLine == "" {
-				continue
+		// Format 2: Single-line row
+		if m := tradeRowSingleLine.FindStringSubmatch(line); m != nil {
+			ticker := m[3]
+			lot := parseStockbitNumber(m[4])
+			price := parseStockbitFloat(m[6])
+			buyVal := parseStockbitFloat(m[7])
+			sellVal := parseStockbitFloat(m[8])
+
+			tradeType := ""
+			if buyVal > 0 && sellVal == 0 {
+				tradeType = "BUY"
+			} else if sellVal > 0 {
+				tradeType = "SELL"
 			}
-			// Stop if we hit another ticker or text section
-			if tickerLinePattern.MatchString(nextLine) || refPattern.MatchString(nextLine) {
-				break
+
+			if tradeType != "" && lot > 0 && price > 0 {
+				trades = append(trades, intermediateStockbitTrade{
+					RefNo:  m[1],
+					Ticker: ticker,
+					Lot:    int(lot),
+					Price:  price,
+					Type:   tradeType,
+				})
 			}
-			n := parseStockbitFloat(nextLine)
-			if n > 0 {
-				numbers = append(numbers, n)
-			}
 		}
 
-		// We expect: lot, quantity, price, buyAmount, sellAmount
-		if len(numbers) < 4 {
-			continue
-		}
-
-		lot := numbers[0]
-		price := numbers[2]
-		buyAmount := numbers[3]
-		var sellAmount float64
-		if len(numbers) >= 5 {
-			sellAmount = numbers[4]
-		}
-
-		var tradeType string
-		var amountDone float64
-		if buyAmount > 0 && sellAmount == 0 {
-			tradeType = "BUY"
-			amountDone = buyAmount
-		} else if sellAmount > 0 && buyAmount == 0 {
-			tradeType = "SELL"
-			amountDone = sellAmount
-		} else if buyAmount > sellAmount {
-			tradeType = "BUY"
-			amountDone = buyAmount
-		} else {
-			tradeType = "SELL"
-			amountDone = sellAmount
-		}
-
-		trade := dto.ParsedTrade{
-			Ticker:     ticker,
-			Lot:        int(lot),
-			Price:      price,
-			Type:       tradeType,
-			Date:       tradeDate,
-			BrokerName: p.BrokerName(),
-			AmountDone: amountDone,
-		}
-
-		trades = append(trades, trade)
-		log.Printf("Stockbit multiline parsed: %s %s %d lot @ %.2f = %.2f", tradeType, ticker, int(lot), price, amountDone)
+		i++
 	}
 
 	return trades
 }
 
+func (p *StockbitParser) extractSummaryFees(lines []string) (buyFees stockbitFeeSummary, sellFees stockbitFeeSummary) {
+	getNums := func(label string) (float64, float64) {
+		for i, line := range lines {
+			if strings.EqualFold(line, label) || strings.HasPrefix(strings.ToLower(line), strings.ToLower(label)) {
+				var nums []float64
+				for j := i + 1; j < len(lines) && j < i+6; j++ {
+					l := lines[j]
+					if l == "" {
+						continue
+					}
+					if isStockbitLabel(l) {
+						break
+					}
+					val, ok := tryParseStockbitFloat(l)
+					if ok {
+						nums = append(nums, val)
+						if len(nums) == 2 {
+							break
+						}
+					}
+				}
+				if len(nums) == 2 {
+					return nums[0], nums[1]
+				} else if len(nums) == 1 {
+					return nums[0], 0
+				}
+			}
+		}
+		return 0, 0
+	}
+
+	buyFees.Commission, sellFees.Commission = getNums("Commission")
+	buyFees.VATComm, sellFees.VATComm = getNums("V.A.T Commission")
+	buyFees.IDXFee, sellFees.IDXFee = getNums("IDX Fee")
+	buyFees.VATLevy, sellFees.VATLevy = getNums("V.A.T Levy")
+	buyFees.IncomeTax, sellFees.IncomeTax = getNums("Income Tax")
+	buyFees.StampDuty, sellFees.StampDuty = getNums("Stamp Duty")
+	buyFees.TotalCost, sellFees.TotalCost = getNums("Total Cost")
+	buyFees.TotalValue, sellFees.TotalValue = getNums("Total Value")
+
+	buyFees.TotalFee = buyFees.Commission + buyFees.VATComm + buyFees.IDXFee + buyFees.VATLevy + buyFees.IncomeTax + buyFees.StampDuty
+	if buyFees.TotalFee == 0 && buyFees.TotalCost > buyFees.TotalValue && buyFees.TotalValue > 0 {
+		buyFees.TotalFee = buyFees.TotalCost - buyFees.TotalValue
+	}
+
+	sellFees.TotalFee = sellFees.Commission + sellFees.VATComm + sellFees.IDXFee + sellFees.VATLevy + sellFees.IncomeTax + sellFees.StampDuty
+	if sellFees.TotalFee == 0 && sellFees.TotalValue > sellFees.TotalCost && sellFees.TotalCost > 0 {
+		sellFees.TotalFee = sellFees.TotalValue - sellFees.TotalCost
+	}
+
+	return buyFees, sellFees
+}
+
+func isStockbitLabel(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	labels := []string{
+		"total value", "total fee", "commission", "v.a.t commission", "idx fee",
+		"v.a.t levy", "income tax", "stamp duty", "total cost", "payment due",
+		"for further", "ref #", "board", "share",
+	}
+	for _, l := range labels {
+		if strings.HasPrefix(s, l) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *StockbitParser) extractTradeDate(content string) time.Time {
-	// Stockbit uses "Transaction Date\n21/05/2026" format
-	txDatePattern := regexp.MustCompile(`Transaction Date\s*\n?\s*(\d{2}/\d{2}/\d{4})`)
+	txDatePattern := regexp.MustCompile(`(?i)Transaction Date\s*[:\r\n\t ]+([0-9]{2}/[0-9]{2}/[0-9]{4})`)
 	match := txDatePattern.FindStringSubmatch(content)
 	if match != nil {
 		t, err := time.Parse("02/01/2006", match[1])
@@ -264,8 +345,7 @@ func (p *StockbitParser) extractTradeDate(content string) time.Time {
 		}
 	}
 
-	// Fallback: look for any date pattern
-	datePattern := regexp.MustCompile(`(\d{2})/(\d{2})/(\d{4})`)
+	datePattern := regexp.MustCompile(`\b([0-9]{2})/([0-9]{2})/([0-9]{4})\b`)
 	match = datePattern.FindStringSubmatch(content)
 	if match != nil {
 		t, err := time.Parse("02/01/2006", match[0])
@@ -277,61 +357,41 @@ func (p *StockbitParser) extractTradeDate(content string) time.Time {
 	return time.Now()
 }
 
-func parseStockbitNumber(s string) float64 {
+func tryParseStockbitFloat(s string) (float64, bool) {
 	s = strings.TrimSpace(s)
-	s = strings.ReplaceAll(s, ",", "")
-	s = strings.ReplaceAll(s, ".", "")
-	val, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return 0
+	if s == "" {
+		return 0, false
 	}
-	return val
-}
-
-func parseStockbitFloat(s string) float64 {
-	s = strings.TrimSpace(s)
-	// Remove thousand separator commas: "423,000.00" -> "423000.00"
-	// Detect format: if both , and . exist, and . comes last, it's international format
 	if strings.Contains(s, ",") && strings.Contains(s, ".") {
 		lastDot := strings.LastIndex(s, ".")
 		lastComma := strings.LastIndex(s, ",")
 		if lastDot > lastComma {
-			// International: 423,000.00
 			s = strings.ReplaceAll(s, ",", "")
 		} else {
-			// Indonesian: 423.000,00
 			s = strings.ReplaceAll(s, ".", "")
 			s = strings.Replace(s, ",", ".", 1)
 		}
 	} else if strings.Contains(s, ",") {
-		// Could be thousand sep or decimal
 		parts := strings.Split(s, ",")
 		if len(parts) == 2 && len(parts[1]) == 2 {
-			// Decimal: "705,00"
 			s = strings.Replace(s, ",", ".", 1)
 		} else {
-			// Thousand: "423,000"
 			s = strings.ReplaceAll(s, ",", "")
 		}
 	}
 
 	val, err := strconv.ParseFloat(s, 64)
 	if err != nil {
-		return 0
+		return 0, false
 	}
+	return val, true
+}
+
+func parseStockbitFloat(s string) float64 {
+	val, _ := tryParseStockbitFloat(s)
 	return val
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+func parseStockbitNumber(s string) float64 {
+	return parseStockbitFloat(s)
 }

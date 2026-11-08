@@ -81,6 +81,10 @@ func (p *MandiriParser) parseContent(content string) ([]dto.ParsedTrade, error) 
 	// e.g., "BBCA  BUY  100  9,500  950,000"
 	tickerPattern := regexp.MustCompile(`([A-Z]{4})\s+(BUY|SELL|BELI|JUAL|B|S)\s+([\d,\.]+)\s+([\d,\.]+)`)
 
+	// Tax pattern: looks for "Tax", "Pajak", "PPN" followed by a number
+	// e.g., "Tax: 10000", "Pajak: 10.000", "PPN 10000"
+	taxPattern := regexp.MustCompile(`(?i)(?:tax|pajak|ppn)\s*[:=]?\s*([\d\.,]+)`)
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -106,7 +110,13 @@ func (p *MandiriParser) parseContent(content string) ([]dto.ParsedTrade, error) 
 			lot = int(shares) // If shares < 100, treat as lot count
 		}
 
-		amountDone := shares * price
+		grossAmount := shares * price  // = lot × 100 × price
+
+		// Extract tax from the document content
+
+		tax := extractTax(content, taxPattern)  // Extract tax using regex pattern
+
+		amountDone := grossAmount + tax  // amount_done includes tax
 
 		trade := dto.ParsedTrade{
 			Ticker:     ticker,
@@ -116,6 +126,7 @@ func (p *MandiriParser) parseContent(content string) ([]dto.ParsedTrade, error) 
 			Date:       tradeDate,
 			BrokerName: p.BrokerName(),
 			AmountDone: amountDone,
+			Tax:        tax,
 		}
 
 		trades = append(trades, trade)
@@ -242,6 +253,15 @@ func (p *MandiriParser) extractTradeDate(content string) time.Time {
 }
 
 // Helper functions
+
+// extractTax tries to find the tax amount from the document content
+func extractTax(content string, taxPattern *regexp.Regexp) float64 {
+	match := taxPattern.FindStringSubmatch(content)
+	if len(match) < 2 {
+		return 0
+	}
+	return parseNumber(match[1])
+}
 
 func normalizeTradeType(t string) string {
 	t = strings.ToUpper(strings.TrimSpace(t))
