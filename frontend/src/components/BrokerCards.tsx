@@ -42,9 +42,8 @@ export default function BrokerCards({ summary }: BrokerCardsProps) {
               aria-label={`Sector Distribution — ${broker.name}`}
             >
               <h4 className="text-xs font-semibold text-slate-700">Sector Distribution</h4>
-              <p className="mt-1 text-[11px] text-slate-500">Persentase nilai saham, tanpa cash</p>
               {broker.sectors.length === 0 ? (
-                <p className="mt-3 text-xs text-slate-500">Belum ada holding bernilai positif.</p>
+                <p className="mt-3 text-xs text-slate-500">-</p>
               ) : (
                 <ul className="mt-3 space-y-3">
                   {broker.sectors.map((sector) => (

@@ -16,6 +16,25 @@ Teknologi yang dipakai: **Vue.js 3** dengan **Vite** sebagai build tool.
 - Lookup harga multi ticker (`GET /stock?tickers=A,B,C`)
 - Konfigurasi `Base URL API` langsung dari UI
 
+## Halaman Market (`/market`)
+
+- Watchlist otomatis berdasarkan holding dengan lot positif dari `GET /my/stocks`.
+- Ticker yang sama dari beberapa broker digabung; filter dan urutan perubahan tersedia.
+- Harga watchlist menggunakan `GET /prices?ticker=A,B,C`, dengan harga yang hilang ditandai, bukan dianggap nol.
+- Top gainers/losers hanya mencakup watchlist, bukan seluruh saham BEI.
+- Klik ticker untuk detail dari `GET /api/market/:ticker` (JWT wajib): nama emiten, harga, previous close, low/high harian dan 52 minggu, volume, waktu harga, serta chart close harian satu bulan.
+- Refresh otomatis setiap lima menit saat tab terlihat; dapat dimatikan. Cache backend juga lima menit.
+- Sumber Yahoo Finance dapat tertunda dan tidak menjamin data real-time. Tidak memerlukan API key; ketersediaan/rate limit dan izin penggunaan tetap mengikuti penyedia. Nilai yang tidak tersedia ditampilkan `—`.
+- Frontend dan backend terbaru harus di-deploy bersama untuk endpoint detail ini.
+
+**Batasan kepemilikan:** halaman mengikuti holdings yang dikembalikan backend. Repository holdings saat ini belum memfilter `user_id`, sehingga watchlist belum terisolasi per akun pada deployment multi-user. JWT pada endpoint Market tidak memperbaiki keterbatasan endpoint holdings yang sudah ada.
+
+Tes helper watchlist dan movers:
+
+```sh
+node --test tests/market.test.cjs
+```
+
 ## Struktur Project
 
 ```

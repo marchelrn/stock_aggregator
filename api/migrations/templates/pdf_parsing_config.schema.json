@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PDF parsing configuration v1",
+  "description": "Go/RE2 regex patterns; one-based capture groups. All markers must match, exactly one date and table are allowed, and every non-whitespace table character must belong to a complete row. Template version is stored separately in the database. Email selectors live on the template record, not in config.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "required_markers", "date", "table", "numbers", "shares_per_lot"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schema_version": {"const": 1},
+    "required_markers": {
+      "type": "array", "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "date": {
+      "type": "object", "additionalProperties": false,
+      "required": ["pattern", "group", "layout"],
+      "properties": {
+        "pattern": {"type": "string", "minLength": 1},
+        "group": {"type": "integer", "minimum": 1},
+        "layout": {"type": "string", "minLength": 1, "description": "Go time layout including a full year, month and day. Parsed date must round-trip exactly."}
+      }
+    },
+    "table": {
+      "type": "object", "additionalProperties": false,
+      "required": ["start_pattern", "end_pattern", "row_pattern", "fields"],
+      "properties": {
+        "start_pattern": {"type": "string", "minLength": 1},
+        "end_pattern": {"type": "string", "minLength": 1},
+        "row_pattern": {"type": "string", "minLength": 1},
+        "fields": {
+          "type": "object", "additionalProperties": false,
+          "description": "Distinct existing capture groups are required for all six fields, including zero-valued buy/sell cells.",
+          "required": ["ticker", "lot", "quantity", "price", "buy_amount", "sell_amount"],
+          "properties": {
+            "ticker": {"type": "integer", "minimum": 1},
+            "lot": {"type": "integer", "minimum": 1},
+            "quantity": {"type": "integer", "minimum": 1},
+            "price": {"type": "integer", "minimum": 1},
+            "buy_amount": {"type": "integer", "minimum": 1},
+            "sell_amount": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "numbers": {
+      "type": "object", "additionalProperties": false,
+      "required": ["decimal_separator", "thousands_separator", "grouping_size"],
+      "description": "Unsigned ASCII digits only. Separators must be distinct single non-alphanumeric, non-whitespace characters other than +, - or /. Thousands separator may be empty. Grouping is strictly validated; exponents and signs are forbidden.",
+      "properties": {
+        "decimal_separator": {"type": "string", "minLength": 1, "maxLength": 1},
+        "thousands_separator": {"type": "string", "maxLength": 1},
+        "grouping_size": {"type": "integer", "minimum": 1, "maximum": 9}
+      }
+    },
+    "shares_per_lot": {"type": "integer", "minimum": 1, "description": "quantity = lot * shares_per_lot; positive integral lot and quantity. Exactly one side amount is positive and equals quantity * price exactly (before any fees)."}
+  }
+}

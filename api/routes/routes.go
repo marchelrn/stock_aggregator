@@ -71,34 +71,13 @@ func SetupRoutes(s *contract.Service) *gin.Engine {
 				"status": "api is healthy",
 			})
 		})
-		// Stock routes
-		api.GET("my/stocks", stockController.GetAllStocks)
-		api.GET("my/stock/:ticker", stockController.GetStocks)
-		api.POST("my/stock", stockController.AddStockData)
-		api.PUT("my/stock/:ticker", stockController.UpdateStock)
-		api.DELETE("my/stock/:ticker", stockController.DeleteStockData)
 
-		// Broker routes
-		api.GET("/brokers", brokerController.GetAllBrokers)
-		api.GET("/brokers-details", brokerController.GetAllBrokersDetails)
-		api.GET("/broker/:name", brokerController.GetBrokersDetails)
-		api.POST("/broker", brokerController.AddBrokerData)
-		api.PUT("/broker/:id", brokerController.UpdateBrokerData)
-		api.DELETE("/broker/:name", brokerController.DeleteBrokerData)
-		api.POST("/broker/transfer-cash", brokerController.TransferCashBetweenBrokers)
-
-		// Transaction routes
-		api.GET("/transaction/:id", transactionController.GetTransaction)  // Get a specific transaction by ID
-		api.GET("/transactions", transactionController.GetAllTransactions) // Get all transactions
-		api.POST("/transaction", transactionController.CreateTransaction)
-		api.DELETE("/transaction/:id", transactionController.DeleteTransaction)
-
-		// Yahoo Finance routes
+		// Yahoo Finance public price routes
 		api.GET("/price/:ticker", yahooController.GetPrice)
 		api.GET("/prices", yahooController.GetPrices)
 		api.GET("/prices/cache", yahooController.GetAllCachedPrices)
 
-		// Google OAuth routes
+		// Google OAuth & Auth routes
 		api.POST("/auth/register", authController.Register)
 		api.POST("/auth/login", authController.Login)
 		api.GET("/auth/google/login", authController.GoogleLogin)
@@ -106,13 +85,36 @@ func SetupRoutes(s *contract.Service) *gin.Engine {
 	}
 
 	// Protected routes (requires JWT authentication)
-	protected := r.Group("/api")
+	protected := r.Group("/")
 	protected.Use(middleware.JWTAuth())
 	{
-		// Gmail sync routes
-		protected.POST("/gmail/sync", gmailController.SyncTradeConfirmations)
-		protected.GET("/gmail/status", gmailController.GetSyncStatus)
-		protected.GET("/auth/user", authController.GetUserInformation)
+		// Stock routes
+		protected.GET("my/stocks", stockController.GetAllStocks)
+		protected.GET("my/stock/:ticker", stockController.GetStocks)
+		protected.POST("my/stock", stockController.AddStockData)
+		protected.PUT("my/stock/:ticker", stockController.UpdateStock)
+		protected.DELETE("my/stock/:ticker", stockController.DeleteStockData)
+
+		// Broker routes
+		protected.GET("/brokers", brokerController.GetAllBrokers)
+		protected.GET("/brokers-details", brokerController.GetAllBrokersDetails)
+		protected.GET("/broker/:name", brokerController.GetBrokersDetails)
+		protected.POST("/broker", brokerController.AddBrokerData)
+		protected.PUT("/broker/:id", brokerController.UpdateBrokerData)
+		protected.DELETE("/broker/:name", brokerController.DeleteBrokerData)
+		protected.POST("/broker/transfer-cash", brokerController.TransferCashBetweenBrokers)
+
+		// Transaction routes
+		protected.GET("/transaction/:id", transactionController.GetTransaction)  // Get a specific transaction by ID
+		protected.GET("/transactions", transactionController.GetAllTransactions) // Get all transactions
+		protected.POST("/transaction", transactionController.CreateTransaction)
+		protected.DELETE("/transaction/:id", transactionController.DeleteTransaction)
+
+		// Market & Gmail sync routes
+		protected.GET("/api/market/:ticker", yahooController.GetMarket)
+		protected.POST("/api/gmail/sync", gmailController.SyncTradeConfirmations)
+		protected.GET("/api/gmail/status", gmailController.GetSyncStatus)
+		protected.GET("/api/auth/user", authController.GetUserInformation)
 	}
 
 	return r

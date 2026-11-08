@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react'
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import DashboardPage from './pages/DashboardPage'
 import BrokersPage from './pages/BrokersPage'
+import MarketPage from './pages/MarketPage'
 import LoginPage from './pages/LoginPage'
 import AuthCallback from './pages/AuthCallback'
 import SetupPage from './pages/SetupPage'
@@ -45,7 +46,7 @@ function Nav() {
 
   return (
     <nav className="border-b border-slate-300 bg-white/80 backdrop-blur">
-      <div className="mx-auto flex max-w-5xl items-center gap-4 px-4 py-3">
+      <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-2 px-4 py-3 sm:gap-4">
         <span className="text-sm font-bold uppercase tracking-widest text-teal-700">Stock API</span>
         <NavLink to="/" className={({ isActive }) => linkClass(isActive)} end>
           Dashboard
@@ -53,12 +54,10 @@ function Nav() {
         <NavLink to="/manage" className={({ isActive }) => linkClass(isActive)}>
           Broker
         </NavLink>
+        <NavLink to="/market" className={({ isActive }) => linkClass(isActive)}>
+          Market
+        </NavLink>
         <div className="flex-1"></div>
-        {/*{userName && (
-          <span className="hidden sm:block text-sm text-slate-500 font-medium">
-            {userName}
-          </span>
-        )}*/}
         <button
           onClick={logout}
           className="rounded-lg px-3 py-1.5 text-sm font-semibold text-rose-600 hover:bg-rose-50 transition"
@@ -103,6 +102,14 @@ export default function App() {
             element={
               <RequireAuth requireSetup>
                 <DashboardPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/market"
+            element={
+              <RequireAuth requireSetup>
+                <MarketPage />
               </RequireAuth>
             }
           />

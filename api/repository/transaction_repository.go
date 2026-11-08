@@ -2,6 +2,8 @@ package repository
 
 import (
 	"fmt"
+	"log"
+	"strings"
 
 	"github.com/marchelrn/stock_api/contract"
 	"github.com/marchelrn/stock_api/models"
@@ -20,35 +22,66 @@ type TransactionRepository struct {
 func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.Transaction) (*models.Transaction, error) {
 	err := r.db.Transaction(func(tx *gorm.DB) error {
 		var broker models.Broker
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", payload.BrokerID).First(&broker).Error; err != nil {
+		if payload.BrokerID == 0 && payload.BrokerName != "" {
+			var b models.Broker
+			if err := tx.Where("user_id = ? AND LOWER(name) = LOWER(?)", payload.UserID, strings.TrimSpace(payload.BrokerName)).First(&b).Error; err == nil {
+				payload.BrokerID = b.ID
+			}
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND id = ?", payload.UserID, payload.BrokerID).First(&broker).Error; err != nil {
 			return err
 		}
 
+		var existingCount int64
+		tx.Model(&models.Transaction{}).
+			Where("user_id = ? AND ticker = ? AND type = ? AND lot = ? AND price = ? AND DATE(date) = DATE(?) AND broker_id = ?",
+				payload.UserID, payload.Ticker, payload.Type, payload.Lot, payload.Price, payload.Date, payload.BrokerID).
+			Count(&existingCount)
+		if existingCount > 0 {
+			log.Printf("Transaction %s %s %d lot @ %.2f on %s already exists, skipping duplicate",
+				payload.Type, payload.Ticker, payload.Lot, payload.Price, payload.Date.Format("2006-01-02"))
+			return nil
+		}
+
 		var stock models.StockHolding
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("ticker = ? AND broker_id = ?", payload.Ticker, payload.BrokerID).First(&stock).Error
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND ticker = ? AND broker_id = ?", payload.UserID, payload.Ticker, payload.BrokerID).First(&stock).Error
 		if err != nil && err != gorm.ErrRecordNotFound {
 			return err
 		}
 
-		brokersFeeBuy := 0.0015
-		brokersFeeSell := 0.0025
-
 		grossAmount := float64(payload.Lot) * 100 * payload.Price
-		buyFee := grossAmount * brokersFeeBuy
-		sellFee := grossAmount * brokersFeeSell
+
+		// Use the actual tax from the parsed trade confirmation if available,
+		// otherwise fallback to default broker fee rates
+		tax := payload.Tax
+		if tax == 0 {
+			switch payload.Type {
+			case models.TypeBuy:
+				tax = grossAmount * 0.0015
+			case models.TypeSell:
+				tax = grossAmount * 0.0025
+			}
+		}
+
+		// amountDone = gross + tax (total cost including fees)
+		amountDone := grossAmount + tax
 
 		switch payload.Type {
 		case models.TypeBuy:
-			totalDebit := grossAmount + buyFee
-			if broker.Cash < totalDebit {
-				return fmt.Errorf("Insufficient broker cash: have Rp.%.1f, need Rp.%.1f", broker.Cash, totalDebit)
+			if broker.Cash < amountDone {
+				return fmt.Errorf("Insufficient broker cash: have Rp.%.1f, need Rp.%.1f", broker.Cash, amountDone)
 			}
+
+			// avg_price includes tax: amountDone / shares
+			shares := float64(payload.Lot) * 100
+			avgPriceWithTax := amountDone / shares
 
 			if err == gorm.ErrRecordNotFound {
 				stock = models.StockHolding{
+					UserID:     payload.UserID,
 					Ticker:     payload.Ticker,
 					Lot:        payload.Lot,
-					AvgPrice:   payload.Price,
+					AvgPrice:   avgPriceWithTax,
 					BrokerID:   payload.BrokerID,
 					BrokerName: payload.BrokerName,
 				}
@@ -57,7 +90,7 @@ func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.
 				}
 			} else {
 				oldTotalValue := float64(stock.Lot) * 100 * stock.AvgPrice
-				newTotalValue := float64(payload.Lot) * 100 * payload.Price
+				newTotalValue := amountDone
 				newLot := stock.Lot + payload.Lot
 				newAvg := (oldTotalValue + newTotalValue) / (float64(newLot) * 100)
 
@@ -70,8 +103,8 @@ func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.
 				}
 			}
 
-			// BUY: cash keluar = nilai transaksi + fee beli
-			broker.Cash -= totalDebit
+			// BUY: cash keluar = gross + tax
+			broker.Cash -= amountDone
 
 		case models.TypeSell:
 			if err == gorm.ErrRecordNotFound {
@@ -85,18 +118,12 @@ func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.
 			stock.BrokerID = payload.BrokerID
 			stock.BrokerName = payload.BrokerName
 
-			if stock.Lot == 0 {
-				if err := tx.Delete(&stock).Error; err != nil {
-					return err
-				}
-			} else {
-				if err := tx.Save(&stock).Error; err != nil {
-					return err
-				}
+			if err := tx.Save(&stock).Error; err != nil {
+				return err
 			}
 
-			// SELL: cash masuk = nilai transaksi - fee jual
-			broker.Cash += (grossAmount - sellFee)
+			// SELL: cash masuk = gross - tax
+			broker.Cash += (grossAmount - tax)
 
 		default:
 			return fmt.Errorf("invalid transaction type: %s", payload.Type)
@@ -121,33 +148,37 @@ func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.
 	return payload, nil
 }
 
-func (r *TransactionRepository) GetTransactions(id int) ([]models.Transaction, error) {
+func (r *TransactionRepository) GetTransactions(userID uint, id int) ([]models.Transaction, error) {
 	var transactions []models.Transaction
-	if err := r.db.Where("id = ?", id).Find(&transactions).Error; err != nil {
-		return nil, err
-	}
-	return transactions, nil
-} // For Development Purpose
-
-func (r *TransactionRepository) GetAllTransactions() ([]models.Transaction, error) {
-	var transactions []models.Transaction
-	if err := r.db.Find(&transactions).Error; err != nil {
+	if err := r.db.Where("user_id = ? AND id = ?", userID, id).Find(&transactions).Error; err != nil {
 		return nil, err
 	}
 	return transactions, nil
 }
 
-func (r *TransactionRepository) CountTransactionsByTicker(ticker string) (int64, error) {
+func (r *TransactionRepository) GetAllTransactions(userID uint) ([]models.Transaction, error) {
+	var transactions []models.Transaction
+	if err := r.db.Where("user_id = ?", userID).Order("date DESC, id DESC").Find(&transactions).Error; err != nil {
+		return nil, err
+	}
+	return transactions, nil
+}
+
+func (r *TransactionRepository) CountTransactionsByTicker(userID uint, ticker string) (int64, error) {
 	var count int64
-	if err := r.db.Model(&models.Transaction{}).Where("ticker = ?", ticker).Count(&count).Error; err != nil {
+	if err := r.db.Model(&models.Transaction{}).Where("user_id = ? AND ticker = ?", userID, ticker).Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil
 }
 
-func (r *TransactionRepository) DeleteTransaction(id int) error {
-	if err := r.db.Delete(&models.Transaction{}, id).Error; err != nil {
-		return err
+func (r *TransactionRepository) DeleteTransaction(userID uint, id int) error {
+	result := r.db.Where("user_id = ? AND id = ?", userID, id).Delete(&models.Transaction{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
 	}
 	return nil
 }

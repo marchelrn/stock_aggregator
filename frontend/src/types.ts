@@ -23,6 +23,26 @@ export interface StockPrice {
   change: number
   change_percent: number
   currency: string
+  updated_at?: string
+}
+
+export interface MarketDetail {
+  ticker: string
+  name: string
+  currency: string
+  exchange: string
+  price: number | null
+  previous_close: number | null
+  change: number | null
+  change_percent: number | null
+  day_high: number | null
+  day_low: number | null
+  fifty_two_week_high: number | null
+  fifty_two_week_low: number | null
+  volume: number | null
+  market_time: number | null
+  fetched_at: string
+  history: { time: number; close: number }[]
 }
 
 export type StockPriceMap = Record<string, StockPrice>
@@ -67,7 +87,8 @@ export interface Transaction {
   type: string
   amount_done: number
   date: string
-  stock: { ticker: string; lot: number }
+  tax: number
+  stock: { ticker: string; lot: number; price?: number }
   broker: { name: string }
 }
 

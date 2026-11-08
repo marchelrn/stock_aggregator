@@ -5,6 +5,7 @@ import "time"
 // Brokers
 type Broker struct {
 	ID        int       `json:"id"`
+	UserID    uint      `json:"user_id" gorm:"column:user_id;index"`
 	Name      string    `json:"name"`
 	Cash      float64   `json:"cash"`
 	CreatedAt time.Time `json:"created_at"`
@@ -19,6 +20,7 @@ type BrokerDetails struct {
 // Stocks
 type StockHolding struct {
 	Id         int       `json:"stock_id" gorm:"column:id;primaryKey"`
+	UserID     uint      `json:"user_id" gorm:"column:user_id;index"`
 	Ticker     string    `json:"ticker"`
 	Lot        int       `json:"lot"`
 	AvgPrice   float64   `json:"avg_price"`
@@ -27,7 +29,7 @@ type StockHolding struct {
 	Broker     Broker    `json:"broker" gorm:"foreignKey:BrokerID;references:ID"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
-	DeletedAt  time.Time `json:"deleted_at" gorm:"index"`
+	DeletedAt  time.Time `json:"deleted_at" gorm:"-"`
 }
 
 type StockPrice struct {
@@ -45,6 +47,7 @@ type StockPrice struct {
 
 type Transaction struct {
 	Id         int       `json:"transaction_id"`
+	UserID     uint      `json:"user_id" gorm:"column:user_id;index"`
 	Ticker     string    `json:"ticker"`
 	Price      float64   `json:"price"`
 	Lot        int       `json:"lot"`
@@ -54,6 +57,7 @@ type Transaction struct {
 	Type       Type      `json:"type" gorm:"type:enum('BUY', 'SELL')"`
 	Date       time.Time `json:"date"`
 	AmountDone float64   `json:"amount_done"`
+	Tax        float64   `json:"tax"`
 }
 
 type Type string

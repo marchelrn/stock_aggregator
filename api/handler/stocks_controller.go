@@ -26,6 +26,12 @@ func (s *StocksController) InitService(svc *contract.Service) {
 }
 
 func (s *StocksController) GetAllStocks(c *gin.Context) {
+	userID, err := getUserID(c)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
 	limiterParam := c.DefaultQuery("limit", "10")
 	limiter, err := strconv.Atoi(limiterParam)
 	if err != nil {
@@ -33,7 +39,7 @@ func (s *StocksController) GetAllStocks(c *gin.Context) {
 		return
 	}
 
-	response, err := s.service.GetAllStocks(limiter)
+	response, err := s.service.GetAllStocks(userID, limiter)
 	if err != nil {
 		HandleError(c, err)
 		return
@@ -46,6 +52,12 @@ func (s *StocksController) GetAllStocks(c *gin.Context) {
 }
 
 func (s *StocksController) GetStocks(c *gin.Context) {
+	userID, err := getUserID(c)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
 	stockTickerParam := c.Param("ticker")
 	if stockTickerParam == "" {
 		HandleError(c, errs.BadRequest("Stock ticker is required"))
@@ -72,7 +84,7 @@ func (s *StocksController) GetStocks(c *gin.Context) {
 		return
 	}
 
-	response, err := s.service.GetStocks(tickers)
+	response, err := s.service.GetStocks(userID, tickers)
 	if err != nil {
 		HandleError(c, err)
 		return
@@ -85,13 +97,19 @@ func (s *StocksController) GetStocks(c *gin.Context) {
 }
 
 func (s *StocksController) AddStockData(c *gin.Context) {
+	userID, err := getUserID(c)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
 	var payload dto.StocksRequest
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		HandleError(c, errs.BadRequest("Invalid request payload"))
 		return
 	}
 
-	response, err := s.service.AddStockData(&payload)
+	response, err := s.service.AddStockData(userID, &payload)
 	if err != nil {
 		HandleError(c, err)
 		return
@@ -104,6 +122,12 @@ func (s *StocksController) AddStockData(c *gin.Context) {
 }
 
 func (s *StocksController) UpdateStock(c *gin.Context) {
+	userID, err := getUserID(c)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
 	stockTickerParam := c.Param("ticker")
 	if stockTickerParam == "" {
 		HandleError(c, errs.BadRequest("Stock ticker is required"))
@@ -135,7 +159,7 @@ func (s *StocksController) UpdateStock(c *gin.Context) {
 		return
 	}
 
-	response, err := s.service.UpdateStock(tickers, &payload)
+	response, err := s.service.UpdateStock(userID, tickers, &payload)
 	if err != nil {
 		HandleError(c, err)
 		return
@@ -148,6 +172,12 @@ func (s *StocksController) UpdateStock(c *gin.Context) {
 }
 
 func (s *StocksController) DeleteStockData(c *gin.Context) {
+	userID, err := getUserID(c)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
 	tickerParam := c.Param("ticker")
 	if tickerParam == "" {
 		HandleError(c, errs.BadRequest("Stock ticker is required"))
@@ -174,7 +204,7 @@ func (s *StocksController) DeleteStockData(c *gin.Context) {
 		return
 	}
 
-	response, err := s.service.DeleteStockData(tickers)
+	response, err := s.service.DeleteStockData(userID, tickers)
 	if err != nil {
 		HandleError(c, err)
 		return

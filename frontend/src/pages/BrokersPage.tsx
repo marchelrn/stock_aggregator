@@ -182,7 +182,12 @@ export default function BrokersPage() {
               </span>
             )}
           </div>
-          <HoldingTable holdings={filteredHoldings} />
+          <HoldingTable
+            holdings={filteredHoldings}
+            stockPrices={state.liveStockPrices || state.stockPrices}
+            tickerSummaries={state.summary?.by_ticker}
+            totalPortfolioValue={state.summary?.total_portfolio_value}
+          />
         </section>
 
         <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">

@@ -18,6 +18,15 @@ func (c *YahooPricesController) InitService(s *contract.Service) {
 	c.yahooService = s.Yahoo
 }
 
+func (c *YahooPricesController) GetMarket(ctx *gin.Context) {
+	market, err := c.yahooService.GetMarket(ctx.Request.Context(), ctx.Param("ticker"))
+	if err != nil {
+		HandleError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"data": market})
+}
+
 func (c *YahooPricesController) GetPrice(ctx *gin.Context) {
 	ticker := strings.ToUpper(ctx.Param("ticker"))
 

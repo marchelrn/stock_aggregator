@@ -101,6 +101,7 @@ type TransactionData struct {
 	Stock      StockTransaction  `json:"stock"`
 	Type       string            `json:"type"`
 	AmountDone float64           `json:"amount_done"`
+	Tax        float64           `json:"tax"`
 	Date       time.Time         `json:"date"`
 }
 
@@ -114,6 +115,7 @@ type TransactionRequest struct {
 	BrokerName string    `json:"broker_name"`
 	Type       string    `json:"type"`
 	Date       time.Time `json:"date"`
+	Tax        float64   `json:"tax"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
@@ -186,6 +188,7 @@ type ParsedTrade struct {
 	Date       time.Time `json:"date"`
 	BrokerName string    `json:"broker_name"`
 	AmountDone float64   `json:"amount_done"`
+	Tax        float64   `json:"tax"`
 }
 
 type GmailSyncResponse struct {
