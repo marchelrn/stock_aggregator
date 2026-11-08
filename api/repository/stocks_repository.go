@@ -15,33 +15,33 @@ func ImplStocksRepository(db *gorm.DB) contract.StocksRepository {
 	return &StocksRepository{db: db}
 }
 
-func (r *StocksRepository) GetAllStocks(limiter int) ([]models.StockHolding, error) {
+func (r *StocksRepository) GetAllStocks(userID uint, limiter int) ([]models.StockHolding, error) {
 	var stocks []models.StockHolding
-	if err := r.db.Preload("Broker").Limit(limiter).Find(&stocks).Error; err != nil {
+	if err := r.db.Preload("Broker").Where("user_id = ?", userID).Limit(limiter).Find(&stocks).Error; err != nil {
 		return nil, err
 	}
 	return stocks, nil
 }
 
-func (r *StocksRepository) GetStocks(ticker []string) ([]models.StockHolding, error) {
+func (r *StocksRepository) GetStocks(userID uint, ticker []string) ([]models.StockHolding, error) {
 	var stocks []models.StockHolding
-	if err := r.db.Preload("Broker").Where("ticker IN ?", ticker).Find(&stocks).Error; err != nil {
+	if err := r.db.Preload("Broker").Where("user_id = ? AND ticker IN ?", userID, ticker).Find(&stocks).Error; err != nil {
 		return nil, err
 	}
 	return stocks, nil
 }
 
-func (r *StocksRepository) GetStocksReturnModels(ticker []string) (*models.StockHolding, error) {
+func (r *StocksRepository) GetStocksReturnModels(userID uint, ticker []string) (*models.StockHolding, error) {
 	var stock models.StockHolding
-	if err := r.db.Preload("Broker").Where("ticker IN ?", ticker).First(&stock).Error; err != nil {
+	if err := r.db.Preload("Broker").Where("user_id = ? AND ticker IN ?", userID, ticker).First(&stock).Error; err != nil {
 		return nil, err
 	}
 	return &stock, nil
 }
 
-func (r *StocksRepository) GetStockByTickerAndBroker(ticker string, brokerID int) (*models.StockHolding, error) {
+func (r *StocksRepository) GetStockByTickerAndBroker(userID uint, ticker string, brokerID int) (*models.StockHolding, error) {
 	var stock models.StockHolding
-	if err := r.db.Preload("Broker").Where("ticker = ? AND broker_id = ?", ticker, brokerID).First(&stock).Error; err != nil {
+	if err := r.db.Preload("Broker").Where("user_id = ? AND ticker = ? AND broker_id = ?", userID, ticker, brokerID).First(&stock).Error; err != nil {
 		return nil, err
 	}
 	return &stock, nil
@@ -54,9 +54,9 @@ func (r *StocksRepository) AddStockData(payload *models.StockHolding) (*models.S
 	return payload, nil
 }
 
-func (r *StocksRepository) UpdateStockData(ticker []string, payload *models.StockHolding) (*models.StockHolding, error) {
+func (r *StocksRepository) UpdateStockData(userID uint, ticker []string, payload *models.StockHolding) (*models.StockHolding, error) {
 	var stock models.StockHolding
-	if err := r.db.Where("ticker IN ?", ticker).First(&stock).Error; err != nil {
+	if err := r.db.Where("user_id = ? AND ticker IN ?", userID, ticker).First(&stock).Error; err != nil {
 		return nil, err
 	}
 
@@ -72,16 +72,16 @@ func (r *StocksRepository) UpdateStockData(ticker []string, payload *models.Stoc
 	return &stock, nil
 }
 
-func (r *StocksRepository) DeleteStockData(stockTicker []string) error {
-	if err := r.db.Where("ticker IN ?", stockTicker).Delete(&models.StockHolding{}).Error; err != nil {
+func (r *StocksRepository) DeleteStockData(userID uint, stockTicker []string) error {
+	if err := r.db.Where("user_id = ? AND ticker IN ?", userID, stockTicker).Delete(&models.StockHolding{}).Error; err != nil {
 		return err
 	}
 	return nil
 }
 
-func (r *StocksRepository) GetStockById(id int) (*models.StockHolding, error) {
+func (r *StocksRepository) GetStockById(userID uint, id int) (*models.StockHolding, error) {
 	var stock models.StockHolding
-	if err := r.db.Preload("Broker").Where("id = ?", id).First(&stock).Error; err != nil {
+	if err := r.db.Preload("Broker").Where("user_id = ? AND id = ?", userID, id).First(&stock).Error; err != nil {
 		return nil, err
 	}
 	return &stock, nil

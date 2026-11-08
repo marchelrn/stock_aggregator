@@ -29,33 +29,33 @@ type AuthRepository interface {
 }
 
 type StocksRepository interface {
-	GetAllStocks(limiter int) ([]models.StockHolding, error)
-	GetStocks(ticker []string) ([]models.StockHolding, error)
-	GetStocksReturnModels(ticker []string) (*models.StockHolding, error)
-	GetStockByTickerAndBroker(ticker string, brokerID int) (*models.StockHolding, error)
-	GetStockById(id int) (*models.StockHolding, error)
+	GetAllStocks(userID uint, limiter int) ([]models.StockHolding, error)
+	GetStocks(userID uint, ticker []string) ([]models.StockHolding, error)
+	GetStocksReturnModels(userID uint, ticker []string) (*models.StockHolding, error)
+	GetStockByTickerAndBroker(userID uint, ticker string, brokerID int) (*models.StockHolding, error)
+	GetStockById(userID uint, id int) (*models.StockHolding, error)
 	AddStockData(payload *models.StockHolding) (*models.StockHolding, error)
-	UpdateStockData(ticker []string, payload *models.StockHolding) (*models.StockHolding, error)
-	DeleteStockData(stockTicker []string) error
+	UpdateStockData(userID uint, ticker []string, payload *models.StockHolding) (*models.StockHolding, error)
+	DeleteStockData(userID uint, stockTicker []string) error
 }
 
 type BrokerRepository interface {
-	GetBrokerById(id int) (*models.Broker, error)
-	GetBrokerDetails(brokerName []string) ([]models.BrokerDetails, error)
-	GetAllBrokerHoldings() ([]models.StockHolding, error)
+	GetBrokerById(userID uint, id int) (*models.Broker, error)
+	GetBrokerDetails(userID uint, brokerName []string) ([]models.BrokerDetails, error)
+	GetAllBrokerHoldings(userID uint) ([]models.StockHolding, error)
 	AddBrokerData(payload *models.Broker) (*models.Broker, error)
-	DeleteBrokerData(brokerName []string) (*models.Broker, error)
-	GetAllBrokers() ([]models.Broker, error)
-	GetBrokerByName(name string) (*models.Broker, error)
-	UpdateBrokerData(id int, payload *models.Broker) (*models.Broker, error)
+	DeleteBrokerData(userID uint, brokerName []string) (*models.Broker, error)
+	GetAllBrokers(userID uint) ([]models.Broker, error)
+	GetBrokerByName(userID uint, name string) (*models.Broker, error)
+	UpdateBrokerData(userID uint, id int, payload *models.Broker) (*models.Broker, error)
 }
 
 type TransactionRepository interface {
-	GetTransactions(id int) ([]models.Transaction, error)
-	GetAllTransactions() ([]models.Transaction, error)
+	GetTransactions(userID uint, id int) ([]models.Transaction, error)
+	GetAllTransactions(userID uint) ([]models.Transaction, error)
 	CreateTransactionAndSyncHolding(payload *models.Transaction) (*models.Transaction, error)
-	CountTransactionsByTicker(ticker string) (int64, error)
-	DeleteTransaction(id int) error
+	CountTransactionsByTicker(userID uint, ticker string) (int64, error)
+	DeleteTransaction(userID uint, id int) error
 }
 
 type YahooRepository interface {

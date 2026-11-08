@@ -20,15 +20,21 @@ func (c *BrokersController) InitService(svc *contract.Service) {
 }
 
 func (c *BrokersController) GetBroker(ctx *gin.Context) {
+	userID, err := getUserID(ctx)
+	if err != nil {
+		HandleError(ctx, err)
+		return
+	}
+
 	idParam := ctx.Param("id")
 	var id int
-	_, err := fmt.Sscanf(idParam, "%d", &id)
+	_, err = fmt.Sscanf(idParam, "%d", &id)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid broker ID"})
 		return
 	}
 
-	broker, err := c.service.Brokers.GetBroker(id)
+	broker, err := c.service.Brokers.GetBroker(userID, id)
 	if err != nil {
 		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -40,7 +46,13 @@ func (c *BrokersController) GetBroker(ctx *gin.Context) {
 }
 
 func (c *BrokersController) GetAllBrokers(ctx *gin.Context) {
-	allBrokers, err := c.service.Brokers.GetAllBrokers()
+	userID, err := getUserID(ctx)
+	if err != nil {
+		HandleError(ctx, err)
+		return
+	}
+
+	allBrokers, err := c.service.Brokers.GetAllBrokers(userID)
 	if err != nil {
 		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -52,10 +64,16 @@ func (c *BrokersController) GetAllBrokers(ctx *gin.Context) {
 }
 
 func (c *BrokersController) GetBrokersDetails(ctx *gin.Context) {
+	userID, err := getUserID(ctx)
+	if err != nil {
+		HandleError(ctx, err)
+		return
+	}
+
 	brokerName := ctx.Param("name")
 	brokerNames := strings.Split(brokerName, ",")
 
-	brokerDetails, err := c.service.Brokers.GetBrokersDetails(brokerNames)
+	brokerDetails, err := c.service.Brokers.GetBrokersDetails(userID, brokerNames)
 	if err != nil {
 		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -67,7 +85,13 @@ func (c *BrokersController) GetBrokersDetails(ctx *gin.Context) {
 }
 
 func (c *BrokersController) GetAllBrokersDetails(ctx *gin.Context) {
-	brokers, err := c.service.Brokers.GetAllBrokersDetails()
+	userID, err := getUserID(ctx)
+	if err != nil {
+		HandleError(ctx, err)
+		return
+	}
+
+	brokers, err := c.service.Brokers.GetAllBrokersDetails(userID)
 	if err != nil {
 		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -79,13 +103,19 @@ func (c *BrokersController) GetAllBrokersDetails(ctx *gin.Context) {
 }
 
 func (c *BrokersController) AddBrokerData(ctx *gin.Context) {
+	userID, err := getUserID(ctx)
+	if err != nil {
+		HandleError(ctx, err)
+		return
+	}
+
 	var payload dto.BrokerRequest
 	if err := ctx.ShouldBindJSON(&payload); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	response, err := c.service.Brokers.AddBrokerData(&payload)
+	response, err := c.service.Brokers.AddBrokerData(userID, &payload)
 	if err != nil {
 		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -98,10 +128,16 @@ func (c *BrokersController) AddBrokerData(ctx *gin.Context) {
 }
 
 func (c *BrokersController) DeleteBrokerData(ctx *gin.Context) {
+	userID, err := getUserID(ctx)
+	if err != nil {
+		HandleError(ctx, err)
+		return
+	}
+
 	brokerName := ctx.Param("name")
 	brokerNames := strings.Split(brokerName, ",")
 
-	response, err := c.service.Brokers.DeleteBrokerData(brokerNames)
+	response, err := c.service.Brokers.DeleteBrokerData(userID, brokerNames)
 	if err != nil {
 		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -114,9 +150,15 @@ func (c *BrokersController) DeleteBrokerData(ctx *gin.Context) {
 }
 
 func (c *BrokersController) UpdateBrokerData(ctx *gin.Context) {
+	userID, err := getUserID(ctx)
+	if err != nil {
+		HandleError(ctx, err)
+		return
+	}
+
 	idParam := ctx.Param("id")
 	var id int
-	_, err := fmt.Sscanf(idParam, "%d", &id)
+	_, err = fmt.Sscanf(idParam, "%d", &id)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid broker ID"})
 		return
@@ -128,7 +170,7 @@ func (c *BrokersController) UpdateBrokerData(ctx *gin.Context) {
 		return
 	}
 
-	response, err := c.service.Brokers.UpdateBrokerData(id, &payload)
+	response, err := c.service.Brokers.UpdateBrokerData(userID, id, &payload)
 	if err != nil {
 		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
 		return
@@ -141,13 +183,19 @@ func (c *BrokersController) UpdateBrokerData(ctx *gin.Context) {
 }
 
 func (c *BrokersController) TransferCashBetweenBrokers(ctx *gin.Context) {
+	userID, err := getUserID(ctx)
+	if err != nil {
+		HandleError(ctx, err)
+		return
+	}
+
 	var payload dto.TransferCashRequest
 	if err := ctx.ShouldBindJSON(&payload); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	response, err := c.service.Brokers.TransferCashBetweenBrokers(&payload)
+	response, err := c.service.Brokers.TransferCashBetweenBrokers(userID, &payload)
 	if err != nil {
 		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
 		return

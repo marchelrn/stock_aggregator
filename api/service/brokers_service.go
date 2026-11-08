@@ -20,12 +20,12 @@ func ImplBrokersService(repo contract.BrokerRepository) contract.BrokersService 
 	return &BrokersService{BrokersRepository: repo}
 }
 
-func (s *BrokersService) TransferCashBetweenBrokers(payload *dto.TransferCashRequest) (*dto.BasicResponse, error) {
-	brokerFrom, err := s.BrokersRepository.GetBrokerById(payload.FromBrokerId)
+func (s *BrokersService) TransferCashBetweenBrokers(userID uint, payload *dto.TransferCashRequest) (*dto.BasicResponse, error) {
+	brokerFrom, err := s.BrokersRepository.GetBrokerById(userID, payload.FromBrokerId)
 	if err != nil {
 		return nil, errs.NotFound("Failed to update Broker : Brokers Not Found")
 	}
-	brokerTo, err := s.BrokersRepository.GetBrokerById(payload.ToBrokerId)
+	brokerTo, err := s.BrokersRepository.GetBrokerById(userID, payload.ToBrokerId)
 	if err != nil {
 		return nil, errs.NotFound("Failed to update Broker : Brokers Not Found")
 	}
@@ -37,12 +37,12 @@ func (s *BrokersService) TransferCashBetweenBrokers(payload *dto.TransferCashReq
 	brokerFrom.Cash -= payload.Amount
 	brokerTo.Cash += payload.Amount
 
-	_, err = s.BrokersRepository.UpdateBrokerData(payload.FromBrokerId, brokerFrom)
+	_, err = s.BrokersRepository.UpdateBrokerData(userID, payload.FromBrokerId, brokerFrom)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = s.BrokersRepository.UpdateBrokerData(payload.ToBrokerId, brokerTo)
+	_, err = s.BrokersRepository.UpdateBrokerData(userID, payload.ToBrokerId, brokerTo)
 	if err != nil {
 		return nil, err
 	}
@@ -54,8 +54,8 @@ func (s *BrokersService) TransferCashBetweenBrokers(payload *dto.TransferCashReq
 	return response, nil
 }
 
-func (s *BrokersService) GetBroker(id int) (*dto.BasicBrokerResponse, error) {
-	broker, err := s.BrokersRepository.GetBrokerById(id)
+func (s *BrokersService) GetBroker(userID uint, id int) (*dto.BasicBrokerResponse, error) {
+	broker, err := s.BrokersRepository.GetBrokerById(userID, id)
 	if err != nil {
 		return nil, errs.NotFound("Failed to get Broker : Broker Not Found")
 	}
@@ -72,8 +72,8 @@ func (s *BrokersService) GetBroker(id int) (*dto.BasicBrokerResponse, error) {
 	return response, nil
 }
 
-func (s *BrokersService) GetAllBrokers() (*dto.BasicBrokersResponse, error) {
-	brokers, err := s.BrokersRepository.GetAllBrokers()
+func (s *BrokersService) GetAllBrokers(userID uint) (*dto.BasicBrokersResponse, error) {
+	brokers, err := s.BrokersRepository.GetAllBrokers(userID)
 	if err != nil {
 		return nil, errs.NotFound("Failed to get Brokers : Brokers Not Found")
 	}
@@ -95,8 +95,8 @@ func (s *BrokersService) GetAllBrokers() (*dto.BasicBrokersResponse, error) {
 	return response, nil
 }
 
-func (s *BrokersService) GetBrokersDetails(brokerName []string) (*dto.BrokersResponse, error) {
-	brokers, err := s.BrokersRepository.GetBrokerDetails(brokerName)
+func (s *BrokersService) GetBrokersDetails(userID uint, brokerName []string) (*dto.BrokersResponse, error) {
+	brokers, err := s.BrokersRepository.GetBrokerDetails(userID, brokerName)
 	if err != nil {
 		return nil, err
 	}
@@ -137,13 +137,13 @@ func (s *BrokersService) GetBrokersDetails(brokerName []string) (*dto.BrokersRes
 	return response, nil
 }
 
-func (s *BrokersService) GetAllBrokersDetails() (*dto.BrokersResponse, error) {
-	allBrokers, err := s.BrokersRepository.GetAllBrokers()
+func (s *BrokersService) GetAllBrokersDetails(userID uint) (*dto.BrokersResponse, error) {
+	allBrokers, err := s.BrokersRepository.GetAllBrokers(userID)
 	if err != nil {
 		return nil, err
 	}
 
-	holdings, err := s.BrokersRepository.GetAllBrokerHoldings()
+	holdings, err := s.BrokersRepository.GetAllBrokerHoldings(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -187,8 +187,7 @@ func (s *BrokersService) GetAllBrokersDetails() (*dto.BrokersResponse, error) {
 	return response, nil
 }
 
-func (s *BrokersService) AddBrokerData(payload *dto.BrokerRequest) (*dto.BrokersResponse, error) {
-
+func (s *BrokersService) AddBrokerData(userID uint, payload *dto.BrokerRequest) (*dto.BrokersResponse, error) {
 	if payload.Cash <= 0 {
 		payload.Cash = 0
 	}
@@ -197,7 +196,7 @@ func (s *BrokersService) AddBrokerData(payload *dto.BrokerRequest) (*dto.Brokers
 		return nil, errs.NotFound("Broker Name Is Required")
 	}
 
-	_, err := s.BrokersRepository.GetBrokerByName(payload.Name)
+	_, err := s.BrokersRepository.GetBrokerByName(userID, payload.Name)
 	if err == nil {
 		return nil, errs.BadRequest("Cannot add Broker Data with the same Broker Name")
 	}
@@ -206,8 +205,9 @@ func (s *BrokersService) AddBrokerData(payload *dto.BrokerRequest) (*dto.Brokers
 	}
 
 	broker := &models.Broker{
-		Name: payload.Name,
-		Cash: payload.Cash,
+		UserID: userID,
+		Name:   payload.Name,
+		Cash:   payload.Cash,
 	}
 
 	brokerModels, err := s.BrokersRepository.AddBrokerData(broker)
@@ -235,8 +235,8 @@ func (s *BrokersService) AddBrokerData(payload *dto.BrokerRequest) (*dto.Brokers
 	return response, nil
 }
 
-func (s *BrokersService) DeleteBrokerData(brokerName []string) (*dto.BasicResponse, error) {
-	_, err := s.BrokersRepository.DeleteBrokerData(brokerName)
+func (s *BrokersService) DeleteBrokerData(userID uint, brokerName []string) (*dto.BasicResponse, error) {
+	_, err := s.BrokersRepository.DeleteBrokerData(userID, brokerName)
 	if err != nil {
 		return nil, err
 	}
@@ -248,12 +248,12 @@ func (s *BrokersService) DeleteBrokerData(brokerName []string) (*dto.BasicRespon
 	return response, nil
 }
 
-func (s *BrokersService) UpdateBrokerData(id int, payload *dto.BrokerRequest) (*dto.BasicResponse, error) {
+func (s *BrokersService) UpdateBrokerData(userID uint, id int, payload *dto.BrokerRequest) (*dto.BasicResponse, error) {
 	if payload.Cash <= 0 {
 		payload.Cash = 0
 	}
 
-	brokerData, err := s.BrokersRepository.GetBrokerById(id)
+	brokerData, err := s.BrokersRepository.GetBrokerById(userID, id)
 	if err != nil {
 		return nil, errs.NotFound("Failed to update Broker : Broker Not Found")
 	}
@@ -261,11 +261,12 @@ func (s *BrokersService) UpdateBrokerData(id int, payload *dto.BrokerRequest) (*
 	newDataCash := brokerData.Cash + payload.Cash
 
 	broker := &models.Broker{
-		Name: payload.Name,
-		Cash: newDataCash,
+		UserID: userID,
+		Name:   payload.Name,
+		Cash:   newDataCash,
 	}
 
-	broker, err = s.BrokersRepository.UpdateBrokerData(id, broker)
+	broker, err = s.BrokersRepository.UpdateBrokerData(userID, id, broker)
 	if err != nil {
 		return nil, err
 	}

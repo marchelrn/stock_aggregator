@@ -21,8 +21,8 @@ type TransactionService struct {
 	Transaction *contract.Repository
 }
 
-func (s *TransactionService) GetTransaction(id int) (*dto.TransactionResponse, error) {
-	transactions, err := s.Transaction.Transactions.GetTransactions(id)
+func (s *TransactionService) GetTransaction(userID uint, id int) (*dto.TransactionResponse, error) {
+	transactions, err := s.Transaction.Transactions.GetTransactions(userID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -49,6 +49,7 @@ func (s *TransactionService) GetTransaction(id int) (*dto.TransactionResponse, e
 			},
 			Type:       string(transaction.Type),
 			AmountDone: transaction.AmountDone,
+			Tax:        transaction.Tax,
 			Date:       transaction.Date,
 		},
 	}
@@ -56,8 +57,8 @@ func (s *TransactionService) GetTransaction(id int) (*dto.TransactionResponse, e
 	return response, nil
 }
 
-func (s *TransactionService) GetAllTransactions() (*dto.AllTransactionsResponse, error) {
-	transactions, err := s.Transaction.Transactions.GetAllTransactions()
+func (s *TransactionService) GetAllTransactions(userID uint) (*dto.AllTransactionsResponse, error) {
+	transactions, err := s.Transaction.Transactions.GetAllTransactions(userID)
 	if err != nil {
 		return nil, err
 	}
@@ -78,6 +79,7 @@ func (s *TransactionService) GetAllTransactions() (*dto.AllTransactionsResponse,
 			},
 			Type:       string(transaction.Type),
 			AmountDone: transaction.AmountDone,
+			Tax:        transaction.Tax,
 			Date:       transaction.Date,
 		})
 	}
@@ -91,15 +93,12 @@ func (s *TransactionService) GetAllTransactions() (*dto.AllTransactionsResponse,
 	return response, nil
 }
 
-func (s *TransactionService) CreateTransaction(ticker []string, payload *dto.TransactionRequest) (*dto.TransactionResponse, error) {
+func (s *TransactionService) CreateTransaction(userID uint, ticker []string, payload *dto.TransactionRequest) (*dto.TransactionResponse, error) {
 	if payload == nil {
 		return nil, errs.BadRequest("request payload is required")
 	}
 
 	brokerID := payload.BrokerID
-	if brokerID == 0 {
-		brokerID = payload.BrokerID
-	}
 	if brokerID == 0 {
 		return nil, errs.BadRequest("broker_id is required")
 	}
@@ -130,9 +129,6 @@ func (s *TransactionService) CreateTransaction(ticker []string, payload *dto.Tra
 
 	transactionType := models.TypeBuy
 	requestType := strings.ToUpper(strings.TrimSpace(payload.Type))
-	if requestType == "" {
-		requestType = strings.ToUpper(strings.TrimSpace(payload.Type))
-	}
 	switch requestType {
 	case "", string(models.TypeBuy):
 		transactionType = models.TypeBuy
@@ -152,9 +148,12 @@ func (s *TransactionService) CreateTransaction(ticker []string, payload *dto.Tra
 		return nil, errs.BadRequest("transaction amount done must be greater than 0")
 	}
 
+	transactionTax := payload.Tax
+	totalAmount := transactionAmountDone + transactionTax
+
 	brokerName := strings.TrimSpace(payload.BrokerName)
 	if brokerName == "" {
-		broker, err := s.Transaction.Brokers.GetAllBrokers()
+		broker, err := s.Transaction.Brokers.GetAllBrokers(userID)
 		if err != nil {
 			return nil, errs.InternalServerError("failed to resolve broker")
 		}
@@ -170,6 +169,7 @@ func (s *TransactionService) CreateTransaction(ticker []string, payload *dto.Tra
 	}
 
 	request := &models.Transaction{
+		UserID:     userID,
 		Ticker:     transactionTicker,
 		Price:      transactionPrice,
 		Lot:        transactionLot,
@@ -177,7 +177,8 @@ func (s *TransactionService) CreateTransaction(ticker []string, payload *dto.Tra
 		BrokerName: brokerName,
 		Type:       transactionType,
 		Date:       transactionDate,
-		AmountDone: transactionAmountDone,
+		AmountDone: totalAmount,
+		Tax:        transactionTax,
 	}
 
 	transaction, err := s.Transaction.Transactions.CreateTransactionAndSyncHolding(request)
@@ -209,6 +210,7 @@ func (s *TransactionService) CreateTransaction(ticker []string, payload *dto.Tra
 			},
 			Type:       string(transaction.Type),
 			AmountDone: transaction.AmountDone,
+			Tax:        transaction.Tax,
 			Date:       transaction.Date,
 		},
 	}
@@ -216,9 +218,12 @@ func (s *TransactionService) CreateTransaction(ticker []string, payload *dto.Tra
 	return response, nil
 }
 
-func (s *TransactionService) DeleteTransaction(id int) (*dto.BasicResponse, error) {
-	err := s.Transaction.Transactions.DeleteTransaction(id)
+func (s *TransactionService) DeleteTransaction(userID uint, id int) (*dto.BasicResponse, error) {
+	err := s.Transaction.Transactions.DeleteTransaction(userID, id)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errs.NotFound("transaction not found")
+		}
 		return nil, err
 	}
 	response := &dto.BasicResponse{

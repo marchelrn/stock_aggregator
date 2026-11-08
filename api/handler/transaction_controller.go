@@ -18,6 +18,12 @@ func (c *TransactionController) InitService(s *contract.Service) {
 }
 
 func (c *TransactionController) GetTransaction(ctx *gin.Context) {
+	userID, err := getUserID(ctx)
+	if err != nil {
+		HandleError(ctx, err)
+		return
+	}
+
 	idParam := ctx.Param("id")
 	if idParam == "" {
 		HandleError(ctx, errs.BadRequest("transaction ID is required"))
@@ -30,7 +36,7 @@ func (c *TransactionController) GetTransaction(ctx *gin.Context) {
 		return
 	}
 
-	response, err := c.service.GetTransaction(id)
+	response, err := c.service.GetTransaction(userID, id)
 	if err != nil {
 		HandleError(ctx, err)
 		return
@@ -40,7 +46,13 @@ func (c *TransactionController) GetTransaction(ctx *gin.Context) {
 }
 
 func (c *TransactionController) GetAllTransactions(ctx *gin.Context) {
-	response, err := c.service.GetAllTransactions()
+	userID, err := getUserID(ctx)
+	if err != nil {
+		HandleError(ctx, err)
+		return
+	}
+
+	response, err := c.service.GetAllTransactions(userID)
 	if err != nil {
 		HandleError(ctx, err)
 		return
@@ -50,6 +62,12 @@ func (c *TransactionController) GetAllTransactions(ctx *gin.Context) {
 }
 
 func (c *TransactionController) CreateTransaction(ctx *gin.Context) {
+	userID, err := getUserID(ctx)
+	if err != nil {
+		HandleError(ctx, err)
+		return
+	}
+
 	var payload dto.TransactionRequest
 	if err := ctx.ShouldBindJSON(&payload); err != nil {
 		HandleError(ctx, errs.BadRequest("invalid request payload"))
@@ -58,7 +76,7 @@ func (c *TransactionController) CreateTransaction(ctx *gin.Context) {
 
 	ticker := ctx.QueryArray("ticker")
 
-	response, err := c.service.CreateTransaction(ticker, &payload)
+	response, err := c.service.CreateTransaction(userID, ticker, &payload)
 	if err != nil {
 		HandleError(ctx, err)
 		return
@@ -68,6 +86,12 @@ func (c *TransactionController) CreateTransaction(ctx *gin.Context) {
 }
 
 func (c *TransactionController) DeleteTransaction(ctx *gin.Context) {
+	userID, err := getUserID(ctx)
+	if err != nil {
+		HandleError(ctx, err)
+		return
+	}
+
 	idParam := ctx.Param("id")
 	if idParam == "" {
 		HandleError(ctx, errs.BadRequest("transaction ID is required"))
@@ -80,7 +104,7 @@ func (c *TransactionController) DeleteTransaction(ctx *gin.Context) {
 		return
 	}
 
-	response, err := c.service.DeleteTransaction(id)
+	response, err := c.service.DeleteTransaction(userID, id)
 	if err != nil {
 		HandleError(ctx, err)
 		return

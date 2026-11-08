@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/mail"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,8 +25,10 @@ import (
 )
 
 type GmailServiceImpl struct {
-	AuthRepository contract.AuthRepository
-	TradeParser    TradeConfirmationParser
+	AuthRepository  contract.AuthRepository
+	TradeParser     TradeConfirmationParser
+	TransactionRepo contract.TransactionRepository
+	BrokerRepo      contract.BrokerRepository
 }
 
 // TradeConfirmationParser is the interface for parsing trade confirmation PDFs
@@ -46,10 +49,12 @@ type emailSelectorProvider interface {
 
 const gmailSyncTimeout = 2 * time.Minute
 
-func ImplGmailService(authRepo contract.AuthRepository, parser TradeConfirmationParser) contract.GmailService {
+func ImplGmailService(authRepo contract.AuthRepository, parser TradeConfirmationParser, txRepo contract.TransactionRepository, brokerRepo contract.BrokerRepository) contract.GmailService {
 	return &GmailServiceImpl{
-		AuthRepository: authRepo,
-		TradeParser:    parser,
+		AuthRepository:  authRepo,
+		TradeParser:     parser,
+		TransactionRepo: txRepo,
+		BrokerRepo:      brokerRepo,
 	}
 }
 
@@ -185,6 +190,54 @@ func (s *GmailServiceImpl) syncTradeConfirmations(ctx context.Context, gmailSrv 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+
+	// Save parsed trades to database
+	var syncedCount int
+	if s.TransactionRepo != nil {
+		sortedTrades := make([]dto.ParsedTrade, len(allTrades))
+		copy(sortedTrades, allTrades)
+		// Process chronologically; on same date, process SELL before BUY so sell proceeds fund buys
+		sort.SliceStable(sortedTrades, func(i, j int) bool {
+			if sortedTrades[i].Date.Equal(sortedTrades[j].Date) {
+				return sortedTrades[i].Type == "SELL" && sortedTrades[j].Type != "SELL"
+			}
+			return sortedTrades[i].Date.Before(sortedTrades[j].Date)
+		})
+
+		for _, trade := range sortedTrades {
+			var brokerID int
+			if s.BrokerRepo != nil && trade.BrokerName != "" {
+				broker, err := s.BrokerRepo.GetBrokerByName(user.Id, trade.BrokerName)
+				if err == nil && broker != nil {
+					brokerID = broker.ID
+				}
+			}
+
+			amountDone := trade.AmountDone
+			if amountDone == 0 {
+				amountDone = float64(trade.Lot)*100*trade.Price + trade.Tax
+			}
+
+			txReq := &models.Transaction{
+				UserID:     user.Id,
+				Ticker:     trade.Ticker,
+				Price:      trade.Price,
+				Lot:        trade.Lot,
+				BrokerID:   brokerID,
+				BrokerName: trade.BrokerName,
+				Type:       models.Type(trade.Type),
+				Date:       trade.Date,
+				AmountDone: amountDone,
+				Tax:        trade.Tax,
+			}
+			if _, saveErr := s.TransactionRepo.CreateTransactionAndSyncHolding(txReq); saveErr != nil {
+				log.Printf("Failed to save trade %s: %v", trade.Ticker, saveErr)
+				continue
+			}
+			syncedCount++
+		}
+	}
+
 	// Save a copy so an unsuccessful repository update cannot advance the
 	// caller's checkpoint. Use the start time to retain mail arriving mid-sync.
 	updated := *user
@@ -194,16 +247,17 @@ func (s *GmailServiceImpl) syncTradeConfirmations(ctx context.Context, gmailSrv 
 	}
 	*user = updated
 
-	message := fmt.Sprintf("Berhasil parse %d trade dari %d email; belum disimpan", len(allTrades), emailCount)
-	if emailCount == 0 {
+	message := fmt.Sprintf("Berhasil parse %d trade dari %d email, disimpan %d trade", len(allTrades), emailCount, syncedCount)
+	if s.TransactionRepo == nil {
+		message = fmt.Sprintf("Berhasil parse %d trade dari %d email; belum disimpan", len(allTrades), emailCount)
+	} else if emailCount == 0 {
 		message = "Tidak ada email trade confirmation baru ditemukan"
 	}
 	return &dto.GmailSyncResponse{
-		StatusCode:  http.StatusOK,
-		Message:     message,
-		TradesFound: len(allTrades),
-		// Parsing does not persist transactions; do not report them as synced.
-		TradesSynced: 0,
+		StatusCode:   http.StatusOK,
+		Message:      message,
+		TradesFound:  len(allTrades),
+		TradesSynced: syncedCount,
 		ParsedTrades: allTrades,
 	}, nil
 }

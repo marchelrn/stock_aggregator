@@ -22,10 +22,10 @@ func ImplStocksService(stocksRepo contract.StocksRepository, brokerRepo contract
 	return &StocksService{StocksRepository: stocksRepo, BrokerRepository: brokerRepo, TransactionRepository: txRepo}
 }
 
-func (s *StocksService) GetAllStocks(limiter int) (*dto.StocksResponse, error) {
+func (s *StocksService) GetAllStocks(userID uint, limiter int) (*dto.StocksResponse, error) {
 	param := limiter
 
-	stocks, err := s.StocksRepository.GetAllStocks(param)
+	stocks, err := s.StocksRepository.GetAllStocks(userID, param)
 	if err != nil {
 		return nil, errs.InternalServerError("Failed to retrieve stock data")
 	}
@@ -52,8 +52,8 @@ func (s *StocksService) GetAllStocks(limiter int) (*dto.StocksResponse, error) {
 	return response, nil
 }
 
-func (s *StocksService) GetStocks(stockTicker []string) (*dto.StocksResponse, error) {
-	stocks, err := s.StocksRepository.GetStocks(stockTicker)
+func (s *StocksService) GetStocks(userID uint, stockTicker []string) (*dto.StocksResponse, error) {
+	stocks, err := s.StocksRepository.GetStocks(userID, stockTicker)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.NotFound("Stock not found")
@@ -87,7 +87,7 @@ func (s *StocksService) GetStocks(stockTicker []string) (*dto.StocksResponse, er
 	return response, nil
 }
 
-func (s *StocksService) AddStockData(payload *dto.StocksRequest) (*dto.StocksResponse, error) {
+func (s *StocksService) AddStockData(userID uint, payload *dto.StocksRequest) (*dto.StocksResponse, error) {
 	stock := &dto.StocksData{
 		Ticker:     strings.ToUpper(strings.TrimSpace(payload.Ticker)),
 		Lot:        payload.Lot,
@@ -110,13 +110,14 @@ func (s *StocksService) AddStockData(payload *dto.StocksRequest) (*dto.StocksRes
 		return nil, errs.BadRequest("broker_id is required")
 	}
 
-	if _, err := s.StocksRepository.GetStockByTickerAndBroker(stock.Ticker, stock.BrokerID); err == nil {
+	if _, err := s.StocksRepository.GetStockByTickerAndBroker(userID, stock.Ticker, stock.BrokerID); err == nil {
 		return nil, errs.BadRequest("stock already exists for this broker, use PUT /stock/:ticker or POST /transaction")
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, errs.InternalServerError("Failed to validate existing stock")
 	}
 
 	addedStock, err := s.StocksRepository.AddStockData(&models.StockHolding{
+		UserID:     userID,
 		Ticker:     stock.Ticker,
 		Lot:        stock.Lot,
 		AvgPrice:   stock.AvgPrice,
@@ -131,6 +132,7 @@ func (s *StocksService) AddStockData(payload *dto.StocksRequest) (*dto.StocksRes
 		StatusCode: http.StatusCreated,
 		Message:    "Stock data added successfully",
 		StocksData: []dto.StocksData{{
+			Id:         addedStock.Id,
 			Ticker:     addedStock.Ticker,
 			Lot:        addedStock.Lot,
 			AvgPrice:   addedStock.AvgPrice,
@@ -143,8 +145,8 @@ func (s *StocksService) AddStockData(payload *dto.StocksRequest) (*dto.StocksRes
 	return response, nil
 }
 
-func (s *StocksService) UpdateStock(stockTicker []string, payload *dto.StocksRequest) (*dto.StocksResponse, error) {
-	stocks, err := s.StocksRepository.GetStocksReturnModels(stockTicker)
+func (s *StocksService) UpdateStock(userID uint, stockTicker []string, payload *dto.StocksRequest) (*dto.StocksResponse, error) {
+	stocks, err := s.StocksRepository.GetStocksReturnModels(userID, stockTicker)
 	if err != nil {
 		return nil, err
 	}
@@ -153,32 +155,32 @@ func (s *StocksService) UpdateStock(stockTicker []string, payload *dto.StocksReq
 		return nil, errs.NotFound("Stock not found")
 	}
 
-	if payload.Ticker == "" {
+	if payload.Ticker != "" {
 		stocks.Ticker = payload.Ticker
 	}
 
-	if payload.Lot == 0 {
+	if payload.Lot != 0 {
 		stocks.Lot = payload.Lot
 	}
 
-	if payload.AvgPrice == 0 {
+	if payload.AvgPrice != 0 {
 		stocks.AvgPrice = payload.AvgPrice
 	}
 
-	if payload.BrokerID == 0 {
+	if payload.BrokerID != 0 {
 		stocks.BrokerID = payload.BrokerID
 	}
 
-	if payload.BrokerName == "" {
+	if payload.BrokerName != "" {
 		stocks.BrokerName = payload.BrokerName
 	}
 
-	updatedStock, err := s.StocksRepository.UpdateStockData(stockTicker, &models.StockHolding{
-		Ticker:     payload.Ticker,
-		Lot:        payload.Lot,
-		AvgPrice:   payload.AvgPrice,
-		BrokerID:   payload.BrokerID,
-		BrokerName: payload.BrokerName,
+	updatedStock, err := s.StocksRepository.UpdateStockData(userID, stockTicker, &models.StockHolding{
+		Ticker:     stocks.Ticker,
+		Lot:        stocks.Lot,
+		AvgPrice:   stocks.AvgPrice,
+		BrokerID:   stocks.BrokerID,
+		BrokerName: stocks.BrokerName,
 	})
 	if err != nil {
 		return nil, errs.InternalServerError("Failed to update stock data")
@@ -201,13 +203,13 @@ func (s *StocksService) UpdateStock(stockTicker []string, payload *dto.StocksReq
 	return response, nil
 }
 
-func (s *StocksService) DeleteStockData(stockTicker []string) (*dto.StocksResponse, error) {
+func (s *StocksService) DeleteStockData(userID uint, stockTicker []string) (*dto.StocksResponse, error) {
 	for _, ticker := range stockTicker {
 		normalized := strings.ToUpper(strings.TrimSpace(ticker))
 		if normalized == "" {
 			continue
 		}
-		count, err := s.TransactionRepository.CountTransactionsByTicker(normalized)
+		count, err := s.TransactionRepository.CountTransactionsByTicker(userID, normalized)
 		if err != nil {
 			return nil, errs.InternalServerError("Failed to validate transaction history")
 		}
@@ -216,7 +218,7 @@ func (s *StocksService) DeleteStockData(stockTicker []string) (*dto.StocksRespon
 		}
 	}
 
-	err := s.StocksRepository.DeleteStockData(stockTicker)
+	err := s.StocksRepository.DeleteStockData(userID, stockTicker)
 	if err != nil {
 		return nil, errs.InternalServerError("Failed to delete stock data")
 	}

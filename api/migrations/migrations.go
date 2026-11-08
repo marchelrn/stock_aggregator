@@ -23,6 +23,7 @@ func getMigrations() []migration {
 		getCreateTableUsers(),
 		getAlterUsersAddGmailTokens(),
 		getCreatePDFParsingTemplates(),
+		getAlterTablesAddUserID(),
 	}
 }
 
