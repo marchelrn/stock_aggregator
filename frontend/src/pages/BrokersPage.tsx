@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePortfolio } from '../context/PortfolioContext'
 import { formatCurrency } from '../lib/formatters'
+import { api } from '../lib/api'
+import { normalizeArray } from '../lib/portfolio'
 import type { Broker, Holding } from '../types'
 import BrokerTable from '../components/BrokerTable'
 import HoldingTable from '../components/HoldingTable'
@@ -13,11 +15,19 @@ interface TradeModalState {
   holding: Holding | null
 }
 
+interface PendingStock {
+  ticker: string
+  lot: number
+  avg_price: number
+}
+
 export default function BrokersPage() {
   const {
     state,
     loadDashboard,
     addBroker,
+    addBrokerCash,
+    addStock,
     deleteBroker,
     createTransaction,
     fetchStockPrices,
@@ -36,8 +46,14 @@ export default function BrokersPage() {
 
   const [configureOpen, setConfigureOpen] = useState(false)
   const [configBrokerName, setConfigBrokerName] = useState('')
-  const [configCash, setConfigCash] = useState(0)
+  const [configCash, setConfigCash] = useState<number | ''>('')
   const [configPin, setConfigPin] = useState('')
+
+  // State untuk penambahan saham pada broker
+  const [pendingStocks, setPendingStocks] = useState<PendingStock[]>([])
+  const [stockTicker, setStockTicker] = useState('')
+  const [stockLot, setStockLot] = useState<number | ''>(1)
+  const [stockAvgPrice, setStockAvgPrice] = useState<number | ''>('')
 
   const [tradeModal, setTradeModal] = useState<TradeModalState>({
     open: false,
@@ -103,23 +119,109 @@ export default function BrokersPage() {
     [tradeLot, tradePrice],
   )
 
+  const handleAddPendingStock = (e?: React.MouseEvent | React.FormEvent) => {
+    if (e) e.preventDefault()
+    const cleanTicker = stockTicker.trim().toUpperCase()
+    if (!cleanTicker) {
+      setStatus('Kode saham (ticker) wajib diisi', true)
+      return
+    }
+    const lotNum = Number(stockLot)
+    if (!lotNum || lotNum <= 0) {
+      setStatus('Jumlah lot harus lebih besar dari 0', true)
+      return
+    }
+    const priceNum = Number(stockAvgPrice)
+    if (!priceNum || priceNum <= 0) {
+      setStatus('Harga rata-rata (avg price) harus lebih besar dari 0', true)
+      return
+    }
+
+    if (pendingStocks.some((s) => s.ticker === cleanTicker)) {
+      setPendingStocks((prev) =>
+        prev.map((s) => (s.ticker === cleanTicker ? { ticker: cleanTicker, lot: lotNum, avg_price: priceNum } : s)),
+      )
+    } else {
+      setPendingStocks((prev) => [
+        ...prev,
+        { ticker: cleanTicker, lot: lotNum, avg_price: priceNum },
+      ])
+    }
+
+    setStockTicker('')
+    setStockLot(1)
+    setStockAvgPrice('')
+  }
+
+  const handleRemovePendingStock = (ticker: string) => {
+    setPendingStocks((prev) => prev.filter((s) => s.ticker !== ticker))
+  }
+
   const submitConfigureBroker = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!configBrokerName) {
       setStatus('Pilih broker terlebih dahulu', true)
       return
     }
-    if (configBrokerName === 'Mandiri Sekuritas' && !configPin) {
+
+    const existingBroker = state.brokers.find(
+      (b) => b.name.toLowerCase() === configBrokerName.toLowerCase(),
+    )
+
+    if (configBrokerName === 'Mandiri Sekuritas' && !existingBroker && !configPin) {
       setStatus('PIN Trade Confirmation wajib diisi untuk Mandiri Sekuritas', true)
       return
     }
 
-    await addBroker(configBrokerName, configCash || 0, configPin)
+    let brokerId: number | null = null
+    const cashValue = Number(configCash) || 0
 
+    if (!existingBroker) {
+      const ok = await addBroker(configBrokerName, cashValue, configPin)
+      if (!ok) return
+      try {
+        const res = await api('/brokers')
+        const updated = normalizeArray<Broker>(res)
+        const found = updated.find(
+          (b) => b.name.toLowerCase() === configBrokerName.toLowerCase(),
+        )
+        if (found) brokerId = Number(found.id)
+      } catch {
+        // fallback
+      }
+    } else {
+      brokerId = Number(existingBroker.id)
+      if (cashValue > 0) {
+        await addBrokerCash(existingBroker, cashValue)
+      }
+    }
+
+    if (brokerId && pendingStocks.length > 0) {
+      let addedCount = 0
+      for (const s of pendingStocks) {
+        const ok = await addStock({
+          ticker: s.ticker,
+          lot: s.lot,
+          avg_price: s.avg_price,
+          broker_id: brokerId,
+          broker_name: configBrokerName,
+        })
+        if (ok) addedCount++
+      }
+      setStatus(`Berhasil mengonfigurasi ${configBrokerName} dan ${addedCount} saham!`)
+    } else if (existingBroker && cashValue > 0) {
+      setStatus(`Berhasil memperbarui cash untuk ${configBrokerName}.`)
+    }
+
+    await loadDashboard()
     setConfigureOpen(false)
     setConfigBrokerName('')
-    setConfigCash(0)
+    setConfigCash('')
     setConfigPin('')
+    setPendingStocks([])
+    setStockTicker('')
+    setStockLot(1)
+    setStockAvgPrice('')
   }
 
   const closeTradeModal = () => {
@@ -357,92 +459,219 @@ export default function BrokersPage() {
       {configureOpen && (
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4"
-          onClick={() => setConfigureOpen(false)}
+          onClick={() => {
+            setConfigureOpen(false)
+            setPendingStocks([])
+          }}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-slate-300 bg-white p-4 shadow-2xl"
+            className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-300 bg-white p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Configure Broker</h3>
+              <h3 className="text-lg font-semibold text-slate-800">Configure Broker & Saham</h3>
               <button
                 className="rounded p-1 text-slate-500 hover:bg-slate-100"
-                onClick={() => setConfigureOpen(false)}
+                onClick={() => {
+                  setConfigureOpen(false)
+                  setPendingStocks([])
+                }}
               >
                 ✕
               </button>
             </div>
 
-            <p className="mb-4 text-sm text-slate-500">
-              Pilih sekuritas yang didukung untuk integrasi trade confirmation dari Gmail.
+            <p className="mb-4 text-xs text-slate-500">
+              Konfigurasikan sekuritas dan tambahkan saham yang Anda miliki saat ini di sekuritas tersebut.
             </p>
 
-            <form className="grid gap-3" onSubmit={submitConfigureBroker}>
-              <label className="text-sm text-slate-600" htmlFor="select-broker">
-                Pilih Broker
-              </label>
-              <select
-                id="select-broker"
-                value={configBrokerName}
-                onChange={(e) => setConfigBrokerName(e.target.value)}
-                required
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-              >
-                <option value="" disabled>
-                  -- Pilih Sekuritas --
-                </option>
-                <option value="Mandiri Sekuritas">Mandiri Sekuritas (Growing/MOST)</option>
-                <option value="Stockbit Sekuritas">Stockbit Sekuritas</option>
-                <option value="BNI Sekuritas">BNI Sekuritas (BIONS)</option>
-              </select>
+            <form className="grid gap-4" onSubmit={submitConfigureBroker}>
+              <div className="grid gap-1.5">
+                <label className="text-xs font-semibold text-slate-700" htmlFor="select-broker">
+                  Pilih Sekuritas / Broker
+                </label>
+                <select
+                  id="select-broker"
+                  value={configBrokerName}
+                  onChange={(e) => setConfigBrokerName(e.target.value)}
+                  required
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-teal-600 focus:outline-none"
+                >
+                  <option value="" disabled>
+                    -- Pilih Sekuritas --
+                  </option>
+                  {state.brokers.length > 0 && (
+                    <optgroup label="Broker Anda Saat Ini">
+                      {state.brokers.map((b) => (
+                        <option key={b.id} value={b.name}>
+                          {b.name} (Tersimpan)
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <optgroup label="Tambah Sekuritas Baru">
+                    {['Stockbit Sekuritas', 'Mandiri Sekuritas', 'BNI Sekuritas']
+                      .filter((name) => !state.brokers.some((b) => b.name.toLowerCase() === name.toLowerCase()))
+                      .map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                  </optgroup>
+                </select>
+              </div>
 
-              <label className="text-sm text-slate-600" htmlFor="initial-cash">
-                Initial Cash (Opsional)
-              </label>
-              <input
-                id="initial-cash"
-                value={configCash}
-                onChange={(e) => setConfigCash(Number(e.target.value))}
-                type="number"
-                min="0"
-                step="0.01"
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-                placeholder="0"
-              />
+              <div className="grid gap-1.5">
+                <label className="text-xs font-semibold text-slate-700" htmlFor="initial-cash">
+                  {state.brokers.some((b) => b.name.toLowerCase() === configBrokerName.toLowerCase())
+                    ? 'Tambah Saldo RDN / Cash (Opsional)'
+                    : 'Initial Cash RDN (Opsional)'}
+                </label>
+                <input
+                  id="initial-cash"
+                  value={configCash}
+                  onChange={(e) => setConfigCash(e.target.value === '' ? '' : Number(e.target.value))}
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-teal-600 focus:outline-none"
+                  placeholder="0"
+                />
+              </div>
 
-              {configBrokerName === 'Mandiri Sekuritas' && (
-                <div className="grid gap-1">
-                  <label className="text-sm text-slate-600" htmlFor="broker-pin">
-                    PIN Trade Confirmation
-                  </label>
-                  <input
-                    id="broker-pin"
-                    value={configPin}
-                    onChange={(e) => setConfigPin(e.target.value)}
-                    type="password"
-                    required
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-                    placeholder="Masukkan PIN"
-                  />
-                  <span className="text-xs text-slate-500">
-                    PIN Anda aman dan akan dienkripsi sebelum disimpan.
-                  </span>
+              {configBrokerName === 'Mandiri Sekuritas' &&
+                !state.brokers.some((b) => b.name.toLowerCase() === 'mandiri sekuritas') && (
+                  <div className="grid gap-1">
+                    <label className="text-xs font-semibold text-slate-700" htmlFor="broker-pin">
+                      PIN Trade Confirmation
+                    </label>
+                    <input
+                      id="broker-pin"
+                      value={configPin}
+                      onChange={(e) => setConfigPin(e.target.value)}
+                      type="password"
+                      required
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-teal-600 focus:outline-none"
+                      placeholder="Masukkan PIN"
+                    />
+                    <span className="text-[11px] text-slate-500">
+                      PIN Anda aman dan akan dienkripsi sebelum disimpan.
+                    </span>
+                  </div>
+                )}
+
+              {/* Section: Tambah Saham yang Dimiliki */}
+              <div className="border-t border-slate-200 pt-3">
+                <div className="mb-2">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+                    Saham yang Dimiliki (Opsional)
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Masukkan saham yang sudah ada di portofolio broker ini beserta harga beli rata-ratanya.
+                  </p>
                 </div>
-              )}
 
-              <div className="mt-3 flex justify-end gap-2">
+                <div className="grid grid-cols-12 gap-2">
+                  <div className="col-span-4">
+                    <label className="block text-[10px] font-medium text-slate-500 mb-1">Ticker</label>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={stockTicker}
+                      onChange={(e) => setStockTicker(e.target.value.toUpperCase())}
+                      placeholder="BBCA"
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-semibold uppercase focus:border-teal-600 focus:outline-none"
+                    />
+                  </div>
+                  <div className="col-span-3">
+                    <label className="block text-[10px] font-medium text-slate-500 mb-1">Lot</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={stockLot}
+                      onChange={(e) => setStockLot(e.target.value === '' ? '' : Number(e.target.value))}
+                      placeholder="Lot"
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs focus:border-teal-600 focus:outline-none"
+                    />
+                  </div>
+                  <div className="col-span-3">
+                    <label className="block text-[10px] font-medium text-slate-500 mb-1">Avg Price</label>
+                    <input
+                      type="number"
+                      min="1"
+                      step="0.01"
+                      value={stockAvgPrice}
+                      onChange={(e) => setStockAvgPrice(e.target.value === '' ? '' : Number(e.target.value))}
+                      placeholder="Rp"
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs focus:border-teal-600 focus:outline-none"
+                    />
+                  </div>
+                  <div className="col-span-2 flex items-end">
+                    <button
+                      type="button"
+                      onClick={handleAddPendingStock}
+                      className="w-full rounded-lg bg-emerald-600 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition"
+                    >
+                      + Tambah
+                    </button>
+                  </div>
+                </div>
+
+                {/* List Pending Stocks */}
+                {pendingStocks.length > 0 && (
+                  <div className="mt-3 space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                    <div className="flex justify-between items-center text-[11px] font-semibold text-slate-600 mb-1">
+                      <span>Daftar Saham ({pendingStocks.length})</span>
+                      <span>Total: {formatCurrency(pendingStocks.reduce((sum, s) => sum + s.lot * 100 * s.avg_price, 0))}</span>
+                    </div>
+                    {pendingStocks.map((s) => (
+                      <div
+                        key={s.ticker}
+                        className="flex items-center justify-between rounded-md bg-white border border-slate-200 px-2.5 py-1.5 text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-teal-800 bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200 text-[11px]">
+                            {s.ticker}
+                          </span>
+                          <span className="text-slate-600">{s.lot} lot</span>
+                          <span className="text-slate-400">•</span>
+                          <span className="text-slate-600 font-mono">@ {formatCurrency(s.avg_price)}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-slate-700 font-mono text-[11px]">
+                            {formatCurrency(s.lot * 100 * s.avg_price)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePendingStock(s.ticker)}
+                            className="text-rose-500 hover:text-rose-700 text-sm font-bold ml-1"
+                            title="Hapus"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-3 flex justify-end gap-2 border-t border-slate-200 pt-3">
                 <button
                   type="button"
-                  className="rounded-lg bg-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-300"
-                  onClick={() => setConfigureOpen(false)}
+                  className="rounded-lg bg-slate-200 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-300 transition"
+                  onClick={() => {
+                    setConfigureOpen(false)
+                    setPendingStocks([])
+                  }}
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white hover:bg-teal-800"
+                  className="rounded-lg bg-teal-700 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-800 transition"
                 >
-                  Configure
+                  Simpan Konfigurasi
                 </button>
               </div>
             </form>

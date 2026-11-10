@@ -43,6 +43,13 @@ interface PortfolioContextValue {
   fetchStockPrices: (tickers: string) => Promise<boolean>
   loadTransactionHistory: () => Promise<Transaction[]>
   clearLiveStockPrices: () => void
+  addStock: (stock: {
+    ticker: string
+    lot: number
+    avg_price: number
+    broker_id: number
+    broker_name?: string
+  }) => Promise<boolean>
 }
 
 const initialState: PortfolioState = {
@@ -274,6 +281,49 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, liveStockPrices: {} }))
   }, [])
 
+  const addStock = useCallback(
+    async (stock: {
+      ticker: string
+      lot: number
+      avg_price: number
+      broker_id: number
+      broker_name?: string
+    }): Promise<boolean> => {
+      try {
+        await api('/my/stock', {
+          method: 'POST',
+          body: JSON.stringify({
+            ticker: stock.ticker.toUpperCase().trim(),
+            lot: Number(stock.lot),
+            avg_price: Number(stock.avg_price),
+            broker_id: Number(stock.broker_id),
+            broker_name: stock.broker_name || '',
+          }),
+        })
+        return true
+      } catch (error) {
+        // Fallback to PUT if the stock holding already exists for this broker
+        try {
+          await api(`/my/stock/${encodeURIComponent(stock.ticker.toUpperCase().trim())}`, {
+            method: 'PUT',
+            body: JSON.stringify({
+              ticker: stock.ticker.toUpperCase().trim(),
+              lot: Number(stock.lot),
+              avg_price: Number(stock.avg_price),
+              broker_id: Number(stock.broker_id),
+              broker_name: stock.broker_name || '',
+            }),
+          })
+          return true
+        } catch (updateErr) {
+          setStatus((error as Error).message || (updateErr as Error).message, true)
+          return false
+        }
+      }
+    },
+    [setStatus],
+  )
+
   const value = useMemo<PortfolioContextValue>(
     () => ({
       state,
@@ -288,8 +338,23 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       fetchStockPrices,
       loadTransactionHistory,
       clearLiveStockPrices,
+      addStock,
     }),
-    [state, status, isError],
+    [
+      state,
+      status,
+      isError,
+      setStatus,
+      loadDashboard,
+      addBroker,
+      addBrokerCash,
+      deleteBroker,
+      createTransaction,
+      fetchStockPrices,
+      loadTransactionHistory,
+      clearLiveStockPrices,
+      addStock,
+    ],
   )
 
   return <PortfolioContext.Provider value={value}>{children}</PortfolioContext.Provider>
