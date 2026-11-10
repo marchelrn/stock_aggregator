@@ -1,0 +1,156 @@
+package service
+
+import (
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/marchelrn/stock_api/dto"
+	"github.com/marchelrn/stock_api/models"
+	"gorm.io/gorm"
+)
+
+type mockStocksRepo struct {
+	stocks []models.StockHolding
+}
+
+func (m *mockStocksRepo) GetAllStocks(userID uint, limiter int) ([]models.StockHolding, error) {
+	var res []models.StockHolding
+	for _, s := range m.stocks {
+		if s.UserID == userID && s.Lot > 0 {
+			res = append(res, s)
+		}
+	}
+	return res, nil
+}
+
+func (m *mockStocksRepo) GetStocks(userID uint, ticker []string) ([]models.StockHolding, error) {
+	var res []models.StockHolding
+	tickerMap := make(map[string]bool)
+	for _, t := range ticker {
+		tickerMap[t] = true
+	}
+	for _, s := range m.stocks {
+		if s.UserID == userID && tickerMap[s.Ticker] && s.Lot > 0 {
+			res = append(res, s)
+		}
+	}
+	return res, nil
+}
+
+func (m *mockStocksRepo) GetStocksReturnModels(userID uint, ticker []string) (*models.StockHolding, error) {
+	stocks, err := m.GetStocks(userID, ticker)
+	if err != nil || len(stocks) == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &stocks[0], nil
+}
+
+func (m *mockStocksRepo) GetStockByTickerAndBroker(userID uint, ticker string, brokerID int) (*models.StockHolding, error) {
+	for i := range m.stocks {
+		if m.stocks[i].UserID == userID && m.stocks[i].Ticker == ticker && m.stocks[i].BrokerID == brokerID {
+			return &m.stocks[i], nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *mockStocksRepo) GetStockById(userID uint, id int) (*models.StockHolding, error) {
+	for i := range m.stocks {
+		if m.stocks[i].UserID == userID && m.stocks[i].Id == id {
+			return &m.stocks[i], nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *mockStocksRepo) AddStockData(payload *models.StockHolding) (*models.StockHolding, error) {
+	payload.Id = len(m.stocks) + 1
+	m.stocks = append(m.stocks, *payload)
+	return payload, nil
+}
+
+func (m *mockStocksRepo) UpdateStockData(userID uint, ticker []string, payload *models.StockHolding) (*models.StockHolding, error) {
+	for i := range m.stocks {
+		if m.stocks[i].UserID == userID && m.stocks[i].Ticker == payload.Ticker {
+			m.stocks[i].Lot = payload.Lot
+			m.stocks[i].AvgPrice = payload.AvgPrice
+			m.stocks[i].BrokerID = payload.BrokerID
+			m.stocks[i].BrokerName = payload.BrokerName
+			m.stocks[i].UpdatedAt = time.Now()
+			return &m.stocks[i], nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (m *mockStocksRepo) DeleteStockData(userID uint, stockTicker []string) error {
+	var filtered []models.StockHolding
+	toDelete := make(map[string]bool)
+	for _, t := range stockTicker {
+		toDelete[t] = true
+	}
+	for _, s := range m.stocks {
+		if !(s.UserID == userID && toDelete[s.Ticker]) {
+			filtered = append(filtered, s)
+		}
+	}
+	m.stocks = filtered
+	return nil
+}
+
+func TestGetAllStocksHidesZeroLot(t *testing.T) {
+	repo := &mockStocksRepo{
+		stocks: []models.StockHolding{
+			{Id: 1, UserID: 1, Ticker: "BBCA", Lot: 100, AvgPrice: 9000, BrokerID: 1},
+			{Id: 2, UserID: 1, Ticker: "BBRI", Lot: 0, AvgPrice: 0, BrokerID: 1}, // Sold out
+			{Id: 3, UserID: 1, Ticker: "TLKM", Lot: 50, AvgPrice: 2800, BrokerID: 1},
+		},
+	}
+	svc := &StocksService{StocksRepository: repo}
+
+	res, err := svc.GetAllStocks(1, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(res.StocksData) != 2 {
+		t.Fatalf("expected 2 active holdings, got %d", len(res.StocksData))
+	}
+	for _, s := range res.StocksData {
+		if s.Ticker == "BBRI" {
+			t.Fatalf("zero lot stock BBRI should not be returned in GetAllStocks")
+		}
+	}
+}
+
+func TestAddStockDataReactivatesZeroLotStock(t *testing.T) {
+	repo := &mockStocksRepo{
+		stocks: []models.StockHolding{
+			{Id: 1, UserID: 1, Ticker: "BBCA", Lot: 0, AvgPrice: 0, BrokerID: 1, BrokerName: "Stockbit"},
+		},
+	}
+	svc := &StocksService{StocksRepository: repo}
+
+	req := &dto.StocksRequest{
+		Ticker:     "BBCA",
+		Lot:        50,
+		AvgPrice:   9200,
+		BrokerID:   1,
+		BrokerName: "Stockbit",
+	}
+
+	res, err := svc.AddStockData(1, req)
+	if err != nil {
+		t.Fatalf("unexpected error reactivating stock: %v", err)
+	}
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected StatusCreated, got %d", res.StatusCode)
+	}
+	if len(res.StocksData) != 1 {
+		t.Fatalf("expected 1 stock returned, got %d", len(res.StocksData))
+	}
+	if res.StocksData[0].Lot != 50 || res.StocksData[0].AvgPrice != 9200 {
+		t.Fatalf("expected lot=50, avg=9200, got lot=%d, avg=%.2f", res.StocksData[0].Lot, res.StocksData[0].AvgPrice)
+	}
+}

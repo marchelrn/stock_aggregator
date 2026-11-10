@@ -54,6 +54,7 @@ type TransactionRepository interface {
 	GetTransactions(userID uint, id int) ([]models.Transaction, error)
 	GetAllTransactions(userID uint) ([]models.Transaction, error)
 	CreateTransactionAndSyncHolding(payload *models.Transaction) (*models.Transaction, error)
+	SyncTradeConfirmationBatch(userID uint, trades []*models.Transaction) (int, error)
 	CountTransactionsByTicker(userID uint, ticker string) (int64, error)
 	DeleteTransaction(userID uint, id int) error
 }

@@ -110,8 +110,34 @@ func (s *StocksService) AddStockData(userID uint, payload *dto.StocksRequest) (*
 		return nil, errs.BadRequest("broker_id is required")
 	}
 
-	if _, err := s.StocksRepository.GetStockByTickerAndBroker(userID, stock.Ticker, stock.BrokerID); err == nil {
-		return nil, errs.BadRequest("stock already exists for this broker, use PUT /stock/:ticker or POST /transaction")
+	existing, err := s.StocksRepository.GetStockByTickerAndBroker(userID, stock.Ticker, stock.BrokerID)
+	if err == nil {
+		if existing.Lot > 0 {
+			return nil, errs.BadRequest("stock already exists for this broker, use PUT /stock/:ticker or POST /transaction")
+		}
+		existing.Lot = stock.Lot
+		existing.AvgPrice = stock.AvgPrice
+		if stock.BrokerName != "" {
+			existing.BrokerName = stock.BrokerName
+		}
+		updatedStock, err := s.StocksRepository.UpdateStockData(userID, []string{stock.Ticker}, existing)
+		if err != nil {
+			return nil, errs.InternalServerError("Failed to reactivate stock data")
+		}
+		return &dto.StocksResponse{
+			StatusCode: http.StatusCreated,
+			Message:    "Stock data added successfully",
+			StocksData: []dto.StocksData{{
+				Id:         updatedStock.Id,
+				Ticker:     updatedStock.Ticker,
+				Lot:        updatedStock.Lot,
+				AvgPrice:   updatedStock.AvgPrice,
+				BrokerID:   updatedStock.BrokerID,
+				BrokerName: updatedStock.BrokerName,
+				CreatedAt:  updatedStock.CreatedAt,
+				UpdatedAt:  updatedStock.UpdatedAt,
+			}},
+		}, nil
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, errs.InternalServerError("Failed to validate existing stock")
 	}

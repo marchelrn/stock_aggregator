@@ -58,6 +58,7 @@ type Transaction struct {
 	Date       time.Time `json:"date"`
 	AmountDone float64   `json:"amount_done"`
 	Tax        float64   `json:"tax"`
+	RefNo      string    `json:"ref_no,omitempty" gorm:"-"`
 }
 
 type Type string

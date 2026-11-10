@@ -17,7 +17,11 @@ func ImplStocksRepository(db *gorm.DB) contract.StocksRepository {
 
 func (r *StocksRepository) GetAllStocks(userID uint, limiter int) ([]models.StockHolding, error) {
 	var stocks []models.StockHolding
-	if err := r.db.Preload("Broker").Where("user_id = ?", userID).Limit(limiter).Find(&stocks).Error; err != nil {
+	query := r.db.Preload("Broker").Where("user_id = ? AND lot > 0", userID)
+	if limiter > 0 {
+		query = query.Limit(limiter)
+	}
+	if err := query.Find(&stocks).Error; err != nil {
 		return nil, err
 	}
 	return stocks, nil
@@ -25,7 +29,7 @@ func (r *StocksRepository) GetAllStocks(userID uint, limiter int) ([]models.Stoc
 
 func (r *StocksRepository) GetStocks(userID uint, ticker []string) ([]models.StockHolding, error) {
 	var stocks []models.StockHolding
-	if err := r.db.Preload("Broker").Where("user_id = ? AND ticker IN ?", userID, ticker).Find(&stocks).Error; err != nil {
+	if err := r.db.Preload("Broker").Where("user_id = ? AND ticker IN ? AND lot > 0", userID, ticker).Find(&stocks).Error; err != nil {
 		return nil, err
 	}
 	return stocks, nil
@@ -33,7 +37,7 @@ func (r *StocksRepository) GetStocks(userID uint, ticker []string) ([]models.Sto
 
 func (r *StocksRepository) GetStocksReturnModels(userID uint, ticker []string) (*models.StockHolding, error) {
 	var stock models.StockHolding
-	if err := r.db.Preload("Broker").Where("user_id = ? AND ticker IN ?", userID, ticker).First(&stock).Error; err != nil {
+	if err := r.db.Preload("Broker").Where("user_id = ? AND ticker IN ? AND lot > 0", userID, ticker).First(&stock).Error; err != nil {
 		return nil, err
 	}
 	return &stock, nil

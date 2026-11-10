@@ -3,6 +3,7 @@ package parser
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -55,12 +56,24 @@ func (p *StockbitParser) Parse(pdfBytes []byte) ([]dto.ParsedTrade, error) {
 
 	content := allText.String()
 	log.Printf("Stockbit PDF content length: %d chars", len(content))
+	if strings.TrimSpace(content) == "" {
+		return nil, fmt.Errorf("%w: PDF contains no extractable text", ErrEmailNotApplicable)
+	}
 
 	return p.parseContent(content)
 }
 
 func (p *StockbitParser) ParseEmail(ctx context.Context, data []byte, meta EmailMetadata) ([]dto.ParsedTrade, error) {
-	return p.Parse(data)
+	trades, err := p.Parse(data)
+	if err != nil {
+		if errors.Is(err, ErrEmailNotApplicable) ||
+			strings.Contains(strings.ToLower(meta.Filename), "eipo") ||
+			strings.Contains(strings.ToLower(meta.Subject), "ipo") {
+			return nil, ErrEmailNotApplicable
+		}
+		return nil, err
+	}
+	return trades, nil
 }
 
 func (p *StockbitParser) EmailSelectors(ctx context.Context) ([]EmailMetadata, error) {
@@ -100,6 +113,9 @@ func (p *StockbitParser) parseContent(content string) ([]dto.ParsedTrade, error)
 
 	rawTrades := p.extractTrades(lines)
 	if len(rawTrades) == 0 {
+		if strings.Contains(content, "Allotment Date") || strings.Contains(content, "TC_EIPO") || strings.Contains(content, "Refund") {
+			return nil, ErrEmailNotApplicable
+		}
 		return nil, fmt.Errorf("tidak ada transaksi ditemukan pada PDF Stockbit")
 	}
 
@@ -145,6 +161,7 @@ func (p *StockbitParser) parseContent(content string) ([]dto.ParsedTrade, error)
 			BrokerName: p.BrokerName(),
 			AmountDone: amountDone,
 			Tax:        tax,
+			RefNo:      t.RefNo,
 		}
 
 		trades = append(trades, trade)
@@ -159,9 +176,9 @@ func (p *StockbitParser) extractTrades(lines []string) []intermediateStockbitTra
 	var trades []intermediateStockbitTrade
 
 	refPattern := regexp.MustCompile(`^\d{5,}$`)
-	boardPattern := regexp.MustCompile(`^(?:RG|NG|TN|UH)$`)
+	boardPattern := regexp.MustCompile(`^(?:RG|NG|TN|UH|IPO)$`)
 	tickerLinePattern := regexp.MustCompile(`^([A-Z]{4})\s+`)
-	tradeRowSingleLine := regexp.MustCompile(`^(\d{5,})\s+(RG|NG|TN|UH)\s+([A-Z]{4})\s+.+?\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)$`)
+	tradeRowSingleLine := regexp.MustCompile(`^(\d{5,})\s+(RG|NG|TN|UH|IPO)\s+([A-Z]{4})\s+.+?\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)$`)
 
 	startIdx := -1
 	endIdx := len(lines)
@@ -206,6 +223,29 @@ func (p *StockbitParser) extractTrades(lines []string) []intermediateStockbitTra
 					ticker := tMatch[1]
 					lot := parseStockbitNumber(block[3])
 					price := parseStockbitFloat(block[5])
+
+					if block[1] == "IPO" {
+						buyVal := parseStockbitFloat(block[6])
+						refundVal := parseStockbitFloat(block[7])
+						if buyVal > 0 && refundVal == 0 {
+							trades = append(trades, intermediateStockbitTrade{
+								RefNo:  block[0],
+								Ticker: ticker,
+								Lot:    int(lot),
+								Price:  price,
+								Type:   "BUY",
+							})
+						} else if refundVal > 0 {
+							for k := range trades {
+								if trades[k].Ticker == ticker && trades[k].Type == "BUY" {
+									trades[k].Lot -= int(lot)
+								}
+							}
+						}
+						i += 8
+						continue
+					}
+
 					buyVal := parseStockbitFloat(block[6])
 					sellVal := parseStockbitFloat(block[7])
 
@@ -264,7 +304,13 @@ func (p *StockbitParser) extractTrades(lines []string) []intermediateStockbitTra
 		i++
 	}
 
-	return trades
+	var activeTrades []intermediateStockbitTrade
+	for _, tr := range trades {
+		if tr.Lot > 0 {
+			activeTrades = append(activeTrades, tr)
+		}
+	}
+	return activeTrades
 }
 
 func (p *StockbitParser) extractSummaryFees(lines []string) (buyFees stockbitFeeSummary, sellFees stockbitFeeSummary) {

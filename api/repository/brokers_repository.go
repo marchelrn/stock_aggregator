@@ -15,7 +15,7 @@ func ImplBrokersRepository(db *gorm.DB) *BrokersRepository {
 
 func (r *BrokersRepository) GetBrokerDetails(userID uint, brokerName []string) ([]models.BrokerDetails, error) {
 	var brokerDetails []models.BrokerDetails
-	if err := r.db.Preload("Stocks", "user_id = ?", userID).Where("user_id = ? AND name IN ?", userID, brokerName).Find(&brokerDetails).Error; err != nil {
+	if err := r.db.Preload("Stocks", "user_id = ? AND lot > 0", userID).Where("user_id = ? AND name IN ?", userID, brokerName).Find(&brokerDetails).Error; err != nil {
 		return nil, err
 	}
 	return brokerDetails, nil
@@ -23,7 +23,7 @@ func (r *BrokersRepository) GetBrokerDetails(userID uint, brokerName []string) (
 
 func (r *BrokersRepository) GetAllBrokerHoldings(userID uint) ([]models.StockHolding, error) {
 	var holdings []models.StockHolding
-	if err := r.db.Preload("Broker").Where("user_id = ?", userID).Order("broker_id ASC, id ASC").Find(&holdings).Error; err != nil {
+	if err := r.db.Preload("Broker").Where("user_id = ? AND lot > 0", userID).Order("broker_id ASC, id ASC").Find(&holdings).Error; err != nil {
 		return nil, err
 	}
 	return holdings, nil

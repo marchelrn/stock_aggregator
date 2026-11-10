@@ -189,6 +189,7 @@ type ParsedTrade struct {
 	BrokerName string    `json:"broker_name"`
 	AmountDone float64   `json:"amount_done"`
 	Tax        float64   `json:"tax"`
+	RefNo      string    `json:"ref_no,omitempty"`
 }
 
 type GmailSyncResponse struct {

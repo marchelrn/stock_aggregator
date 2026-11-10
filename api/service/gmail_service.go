@@ -47,7 +47,7 @@ type emailSelectorProvider interface {
 	EmailSelectors(context.Context) ([]parser.EmailMetadata, error)
 }
 
-const gmailSyncTimeout = 2 * time.Minute
+const gmailSyncTimeout = 5 * time.Minute
 
 func ImplGmailService(authRepo contract.AuthRepository, parser TradeConfirmationParser, txRepo contract.TransactionRepository, brokerRepo contract.BrokerRepository) contract.GmailService {
 	return &GmailServiceImpl{
@@ -154,7 +154,11 @@ func (s *GmailServiceImpl) SyncTradeConfirmationsContext(ctx context.Context, us
 }
 
 func (s *GmailServiceImpl) syncTradeConfirmations(ctx context.Context, gmailSrv *gmail.Service, user *models.Users, startedAt time.Time) (*dto.GmailSyncResponse, error) {
-	query, err := s.tradeConfirmationQuery(ctx, user.LastGmailSyncAt)
+	syncDate := user.LastGmailSyncAt
+	if syncDate == nil && !user.CreatedAt.IsZero() {
+		syncDate = &user.CreatedAt
+	}
+	query, err := s.tradeConfirmationQuery(ctx, syncDate)
 	if err != nil {
 		return nil, err
 	}
@@ -193,18 +197,9 @@ func (s *GmailServiceImpl) syncTradeConfirmations(ctx context.Context, gmailSrv 
 
 	// Save parsed trades to database
 	var syncedCount int
-	if s.TransactionRepo != nil {
-		sortedTrades := make([]dto.ParsedTrade, len(allTrades))
-		copy(sortedTrades, allTrades)
-		// Process chronologically; on same date, process SELL before BUY so sell proceeds fund buys
-		sort.SliceStable(sortedTrades, func(i, j int) bool {
-			if sortedTrades[i].Date.Equal(sortedTrades[j].Date) {
-				return sortedTrades[i].Type == "SELL" && sortedTrades[j].Type != "SELL"
-			}
-			return sortedTrades[i].Date.Before(sortedTrades[j].Date)
-		})
-
-		for _, trade := range sortedTrades {
+	if s.TransactionRepo != nil && len(allTrades) > 0 {
+		var txReqs []*models.Transaction
+		for _, trade := range allTrades {
 			var brokerID int
 			if s.BrokerRepo != nil && trade.BrokerName != "" {
 				broker, err := s.BrokerRepo.GetBrokerByName(user.Id, trade.BrokerName)
@@ -218,7 +213,7 @@ func (s *GmailServiceImpl) syncTradeConfirmations(ctx context.Context, gmailSrv 
 				amountDone = float64(trade.Lot)*100*trade.Price + trade.Tax
 			}
 
-			txReq := &models.Transaction{
+			txReqs = append(txReqs, &models.Transaction{
 				UserID:     user.Id,
 				Ticker:     trade.Ticker,
 				Price:      trade.Price,
@@ -229,13 +224,20 @@ func (s *GmailServiceImpl) syncTradeConfirmations(ctx context.Context, gmailSrv 
 				Date:       trade.Date,
 				AmountDone: amountDone,
 				Tax:        trade.Tax,
-			}
-			if _, saveErr := s.TransactionRepo.CreateTransactionAndSyncHolding(txReq); saveErr != nil {
-				log.Printf("Failed to save trade %s: %v", trade.Ticker, saveErr)
-				continue
-			}
-			syncedCount++
+				RefNo:      trade.RefNo,
+			})
 		}
+
+		// Sort trades chronologically (oldest date first) to preserve trading sequence
+		sort.SliceStable(txReqs, func(i, j int) bool {
+			return txReqs[i].Date.Before(txReqs[j].Date)
+		})
+
+		synced, err := s.TransactionRepo.SyncTradeConfirmationBatch(user.Id, txReqs)
+		if err != nil {
+			log.Printf("Failed to sync trade confirmation batch: %v", err)
+		}
+		syncedCount = synced
 	}
 
 	// Save a copy so an unsuccessful repository update cannot advance the
@@ -335,11 +337,74 @@ func (s *GmailServiceImpl) tradeConfirmationQuery(ctx context.Context, lastSyncA
 	return query, nil
 }
 
+// parseEmailDate attempts to parse an email Date header value across RFC 5322 and common variants.
+func parseEmailDate(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, errors.New("empty date")
+	}
+	if t, err := mail.ParseDate(value); err == nil && !t.IsZero() {
+		return t, nil
+	}
+	layouts := []string{
+		time.RFC1123Z,
+		time.RFC1123,
+		time.RFC822Z,
+		time.RFC822,
+		time.RFC3339,
+		"2006-01-02 15:04:05 -0700",
+		"2006-01-02 15:04:05",
+	}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, value); err == nil && !t.IsZero() {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unable to parse email date: %s", value)
+}
+
+func findHeader(part *gmail.MessagePart, name string) string {
+	if part == nil {
+		return ""
+	}
+	for _, h := range part.Headers {
+		if h != nil && strings.EqualFold(h.Name, name) {
+			return h.Value
+		}
+	}
+	for _, child := range part.Parts {
+		if val := findHeader(child, name); val != "" {
+			return val
+		}
+	}
+	return ""
+}
+
+// extractMessageDate extracts the sent time of the email from the Date header,
+// falling back to InternalDate if the header is absent or unparseable.
+func extractMessageDate(msg *gmail.Message) time.Time {
+	if msg == nil {
+		return time.Time{}
+	}
+	if msg.Payload != nil {
+		if dateVal := findHeader(msg.Payload, "Date"); dateVal != "" {
+			if t, err := parseEmailDate(dateVal); err == nil && !t.IsZero() {
+				return t
+			}
+		}
+	}
+	if msg.InternalDate > 0 {
+		return time.UnixMilli(msg.InternalDate)
+	}
+	return time.Time{}
+}
+
 // processMessageAttachments downloads and parses PDF attachments from a Gmail message
 func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailSrv *gmail.Service, msg *gmail.Message) ([]dto.ParsedTrade, error) {
 	if msg == nil || msg.Payload == nil {
 		return nil, fmt.Errorf("Gmail message has no MIME payload")
 	}
+	emailDate := extractMessageDate(msg)
 	meta := parser.EmailMetadata{}
 	for _, header := range msg.Payload.Headers {
 		if header == nil {
@@ -397,13 +462,19 @@ func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailS
 				parsed, err = s.TradeParser.Parse(pdfBytes)
 			}
 			switch {
-			case errors.Is(err, parser.ErrEmailNotApplicable):
-				// An unrelated PDF is not a failed parse; keep visiting siblings.
+			case errors.Is(err, parser.ErrEmailNotApplicable) || (err != nil && (strings.Contains(err.Error(), "no extractable text") || strings.Contains(err.Error(), "no active template matches"))):
+				// An unrelated or unreadable PDF is not a fatal parse; keep visiting siblings.
+				log.Printf("Skipping unreadable or inapplicable PDF %q: %v", part.Filename, err)
 			case err != nil:
 				return fmt.Errorf("parse PDF %q: %w", part.Filename, err)
 			case len(parsed) == 0:
 				return fmt.Errorf("parse PDF %q: no trades found", part.Filename)
 			default:
+				if !emailDate.IsZero() {
+					for i := range parsed {
+						parsed[i].Date = emailDate
+					}
+				}
 				trades = append(trades, parsed...)
 			}
 		}

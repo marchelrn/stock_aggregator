@@ -40,10 +40,10 @@ func (*CreatePDFParsingTemplates) Up(conn *sql.Tx) error {
 	}
 	// Existing user edits, activation choices and selectors are never overwritten.
 	_, err = conn.Exec(`
-		INSERT INTO pdf_parsing_templates (key, broker_name, version, active, config)
-		VALUES ($1, $2, $3, $4, $5::jsonb)
+		INSERT INTO pdf_parsing_templates (key, broker_name, version, active, config, email_sender, subject_contains)
+		VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
 		ON CONFLICT (key, version) DO NOTHING`,
-		"stockbit", "Stockbit Sekuritas", 1, true, string(stockbitV1Config))
+		"stockbit", "Stockbit Sekuritas", 1, true, string(stockbitV1Config), "no-reply@stockbit.com", "Trade Confirmation")
 	return err
 }
 

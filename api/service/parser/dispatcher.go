@@ -3,6 +3,8 @@ package parser
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/marchelrn/stock_api/dto"
@@ -62,9 +64,12 @@ func (d *BrokerDispatcherParser) ParseEmail(ctx context.Context, data []byte, me
 	filename := strings.ToLower(meta.Filename)
 
 	if strings.Contains(from, "stockbit") || strings.Contains(subj, "stockbit") || strings.Contains(filename, "tc_") || bytes.Contains(data, []byte("STOCKBIT")) {
-		trades, err := d.stockbit.Parse(data)
+		trades, err := d.stockbit.ParseEmail(ctx, data, meta)
 		if err == nil && len(trades) > 0 {
 			return trades, nil
+		}
+		if errors.Is(err, ErrEmailNotApplicable) {
+			return nil, ErrEmailNotApplicable
 		}
 	}
 
@@ -76,13 +81,23 @@ func (d *BrokerDispatcherParser) ParseEmail(ctx context.Context, data []byte, me
 	}
 
 	// Try stockbit parser
-	trades, err := d.stockbit.Parse(data)
+	trades, err := d.stockbit.ParseEmail(ctx, data, meta)
 	if err == nil && len(trades) > 0 {
 		return trades, nil
 	}
+	if errors.Is(err, ErrEmailNotApplicable) {
+		return nil, ErrEmailNotApplicable
+	}
 
 	if d.metadata != nil {
-		return d.metadata.ParseEmail(ctx, data, meta)
+		trades, err := d.metadata.ParseEmail(ctx, data, meta)
+		if err != nil {
+			if strings.Contains(err.Error(), "no extractable text") || strings.Contains(err.Error(), "no active template matches") {
+				return nil, fmt.Errorf("%w: %s", ErrEmailNotApplicable, err.Error())
+			}
+			return nil, err
+		}
+		return trades, nil
 	}
 
 	return nil, err

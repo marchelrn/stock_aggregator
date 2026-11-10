@@ -599,3 +599,389 @@ func TestGmailSyncCanceledContext(t *testing.T) {
 		t.Fatalf("error=%v updates=%d", err, repo.updates)
 	}
 }
+
+func TestParseEmailDate(t *testing.T) {
+	tests := []struct {
+		input   string
+		wantErr bool
+		year    int
+		month   time.Month
+		day     int
+		hour    int
+		min     int
+	}{
+		{input: "Fri, 06 Nov 2026 18:30:15 +0700", year: 2026, month: 11, day: 6, hour: 18, min: 30},
+		{input: "06 Nov 2026 18:30:15 +0700", year: 2026, month: 11, day: 6, hour: 18, min: 30},
+		{input: "Fri, 06 Nov 2026 18:30:15 +0700 (WIB)", year: 2026, month: 11, day: 6, hour: 18, min: 30},
+		{input: "Fri, 06 Nov 2026 11:30:15 GMT", year: 2026, month: 11, day: 6, hour: 11, min: 30},
+		{input: "2026-11-06T18:30:15+07:00", year: 2026, month: 11, day: 6, hour: 18, min: 30},
+		{input: "", wantErr: true},
+		{input: "not a valid date", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			got, err := parseEmailDate(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %q, got nil", tc.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", tc.input, err)
+			}
+			if got.Year() != tc.year || got.Month() != tc.month || got.Day() != tc.day || got.Hour() != tc.hour || got.Minute() != tc.min {
+				t.Fatalf("parsed date mismatch: got %v, want %04d-%02d-%02d %02d:%02d", got, tc.year, tc.month, tc.day, tc.hour, tc.min)
+			}
+		})
+	}
+}
+
+func TestExtractMessageDate(t *testing.T) {
+	if got := extractMessageDate(nil); !got.IsZero() {
+		t.Fatalf("expected zero time for nil message, got %v", got)
+	}
+
+	// Top-level Date header
+	msg := &gmail.Message{
+		Payload: &gmail.MessagePart{
+			Headers: []*gmail.MessagePartHeader{
+				{Name: "Date", Value: "Fri, 06 Nov 2026 18:30:15 +0700"},
+			},
+		},
+	}
+	got := extractMessageDate(msg)
+	if got.Year() != 2026 || got.Hour() != 18 || got.Minute() != 30 {
+		t.Fatalf("expected 2026-11-06 18:30:15, got %v", got)
+	}
+
+	// Nested part Date header
+	nestedMsg := &gmail.Message{
+		Payload: &gmail.MessagePart{
+			Parts: []*gmail.MessagePart{
+				{
+					Headers: []*gmail.MessagePartHeader{
+						{Name: "date", Value: "Fri, 06 Nov 2026 19:45:00 +0700"},
+					},
+				},
+			},
+		},
+	}
+	gotNested := extractMessageDate(nestedMsg)
+	if gotNested.Hour() != 19 || gotNested.Minute() != 45 {
+		t.Fatalf("expected 19:45, got %v", gotNested)
+	}
+
+	// Fallback to InternalDate when Date header is absent
+	internalTime := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	internalMsg := &gmail.Message{
+		InternalDate: internalTime.UnixMilli(),
+		Payload:      &gmail.MessagePart{},
+	}
+	gotInternal := extractMessageDate(internalMsg)
+	if !gotInternal.Equal(internalTime) {
+		t.Fatalf("expected internal date %v, got %v", internalTime, gotInternal)
+	}
+
+	// Fallback to InternalDate when Date header is invalid
+	invalidHeaderMsg := &gmail.Message{
+		InternalDate: internalTime.UnixMilli(),
+		Payload: &gmail.MessagePart{
+			Headers: []*gmail.MessagePartHeader{
+				{Name: "Date", Value: "garbage"},
+			},
+		},
+	}
+	gotInvalid := extractMessageDate(invalidHeaderMsg)
+	if !gotInvalid.Equal(internalTime) {
+		t.Fatalf("expected internal date %v, got %v", internalTime, gotInvalid)
+	}
+
+	// Zero time when neither is present
+	emptyMsg := &gmail.Message{Payload: &gmail.MessagePart{}}
+	if gotEmpty := extractMessageDate(emptyMsg); !gotEmpty.IsZero() {
+		t.Fatalf("expected zero time, got %v", gotEmpty)
+	}
+}
+
+func TestProcessMessageAttachmentsOverridesDateWithEmailSentTime(t *testing.T) {
+	pdfDate := time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC)
+	emailSentDate := time.Date(2026, 11, 6, 18, 30, 0, 0, time.FixedZone("WIB", 7*3600))
+
+	spy := &gmailSelectorParser{
+		selectors: []parser.EmailMetadata{{Subject: "Trade Confirmation"}},
+	}
+	spy.parseEmail = func(meta parser.EmailMetadata) ([]dto.ParsedTrade, error) {
+		return []dto.ParsedTrade{
+			{Ticker: "BBCA", Price: 10000, Lot: 5, Type: "BUY", Date: pdfDate},
+		}, nil
+	}
+
+	service := &GmailServiceImpl{TradeParser: spy}
+	client := fakeGmail(t, func(w http.ResponseWriter, r *http.Request) {})
+
+	msg := &gmail.Message{
+		Id: "msg1",
+		Payload: &gmail.MessagePart{
+			Filename: "tc.pdf",
+			Body:     &gmail.MessagePartBody{Data: "UERG"},
+			Headers: []*gmail.MessagePartHeader{
+				{Name: "Subject", Value: "Trade Confirmation"},
+				{Name: "Date", Value: emailSentDate.Format(time.RFC1123Z)},
+			},
+		},
+	}
+
+	trades, err := service.processMessageAttachments(context.Background(), client, msg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(trades) != 1 {
+		t.Fatalf("expected 1 trade, got %d", len(trades))
+	}
+	if !trades[0].Date.Equal(emailSentDate) {
+		t.Fatalf("expected trade date %v (email sent time), got %v", emailSentDate, trades[0].Date)
+	}
+}
+
+type mockTxRepo struct {
+	contract.TransactionRepository
+	savedTransactions []*models.Transaction
+}
+
+func (m *mockTxRepo) CreateTransactionAndSyncHolding(payload *models.Transaction) (*models.Transaction, error) {
+	copyTx := *payload
+	m.savedTransactions = append(m.savedTransactions, &copyTx)
+	return payload, nil
+}
+
+func (m *mockTxRepo) SyncTradeConfirmationBatch(userID uint, trades []*models.Transaction) (int, error) {
+	for _, t := range trades {
+		copyTx := *t
+		m.savedTransactions = append(m.savedTransactions, &copyTx)
+	}
+	return len(trades), nil
+}
+
+type mockBrokerRepo struct {
+	contract.BrokerRepository
+}
+
+func (m *mockBrokerRepo) GetBrokerByName(userID uint, name string) (*models.Broker, error) {
+	return &models.Broker{ID: 1, Name: name, UserID: userID}, nil
+}
+
+func TestSyncTradeConfirmationsStoresEmailSentDate(t *testing.T) {
+	emailSentDate := time.Date(2026, 11, 6, 18, 45, 30, 0, time.FixedZone("WIB", 7*3600))
+	pdfDate := time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC)
+
+	spy := &gmailSelectorParser{
+		selectors: []parser.EmailMetadata{{Subject: "Trade Confirmation"}},
+	}
+	spy.parseEmail = func(meta parser.EmailMetadata) ([]dto.ParsedTrade, error) {
+		return []dto.ParsedTrade{
+			{Ticker: "BBRI", Price: 5000, Lot: 10, Type: "BUY", Date: pdfDate, BrokerName: "Stockbit"},
+		}, nil
+	}
+
+	txRepo := &mockTxRepo{}
+	brokerRepo := &mockBrokerRepo{}
+	user := &models.Users{Id: 42}
+	authRepo := &gmailAuthRepo{user: user}
+
+	service := &GmailServiceImpl{
+		AuthRepository:  authRepo,
+		TradeParser:     spy,
+		TransactionRepo: txRepo,
+		BrokerRepo:      brokerRepo,
+	}
+
+	client := fakeGmail(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/messages") {
+			gmailJSON(t, w, &gmail.ListMessagesResponse{
+				Messages: []*gmail.Message{{Id: "email1"}},
+			})
+			return
+		}
+		gmailJSON(t, w, &gmail.Message{
+			Id: "email1",
+			Payload: &gmail.MessagePart{
+				Filename: "tc.pdf",
+				Body:     &gmail.MessagePartBody{Data: "UERG"},
+				Headers: []*gmail.MessagePartHeader{
+					{Name: "Subject", Value: "Trade Confirmation"},
+					{Name: "Date", Value: emailSentDate.Format(time.RFC1123Z)},
+				},
+			},
+		})
+	})
+
+	resp, err := service.syncTradeConfirmations(context.Background(), client, user, time.Now())
+	if err != nil {
+		t.Fatalf("unexpected sync error: %v", err)
+	}
+	if resp.TradesSynced != 1 {
+		t.Fatalf("expected 1 trade synced, got %d", resp.TradesSynced)
+	}
+	if len(txRepo.savedTransactions) != 1 {
+		t.Fatalf("expected 1 transaction saved to repository, got %d", len(txRepo.savedTransactions))
+	}
+	savedTx := txRepo.savedTransactions[0]
+	if !savedTx.Date.Equal(emailSentDate) {
+		t.Fatalf("expected transaction date in repository to be %v (email sent time), got %v", emailSentDate, savedTx.Date)
+	}
+	if savedTx.Date.Hour() != 18 || savedTx.Date.Minute() != 45 || savedTx.Date.Second() != 30 {
+		t.Fatalf("expected hour 18:45:30, got %v", savedTx.Date)
+	}
+}
+
+func TestProcessMessageAttachmentsSkipsNoExtractableText(t *testing.T) {
+	spy := &gmailMetadataParser{
+		gmailLegacyParser: gmailLegacyParser{err: errors.New("PDF contains no extractable text")},
+	}
+	service := &GmailServiceImpl{TradeParser: spy}
+	client := fakeGmail(t, func(w http.ResponseWriter, r *http.Request) {})
+
+	msg := &gmail.Message{
+		Id: "msg1",
+		Payload: &gmail.MessagePart{
+			Filename: "scanned.pdf",
+			Body:     &gmail.MessagePartBody{Data: "UERG"},
+		},
+	}
+
+	trades, err := service.processMessageAttachments(context.Background(), client, msg)
+	if err != nil {
+		t.Fatalf("expected unreadable PDF to be skipped, got error: %v", err)
+	}
+	if len(trades) != 0 {
+		t.Fatalf("expected 0 trades, got %d", len(trades))
+	}
+}
+
+func TestProcessMessageAttachmentsSkipsUnmatchedTemplatePDF(t *testing.T) {
+	spy := &gmailMetadataParser{
+		gmailLegacyParser: gmailLegacyParser{err: errors.New("unmatched PDF: no active template matches")},
+	}
+	service := &GmailServiceImpl{TradeParser: spy}
+	client := fakeGmail(t, func(w http.ResponseWriter, r *http.Request) {})
+
+	msg := &gmail.Message{
+		Id: "msg1",
+		Payload: &gmail.MessagePart{
+			Filename: "bond.pdf",
+			Body:     &gmail.MessagePartBody{Data: "UERG"},
+		},
+	}
+
+	trades, err := service.processMessageAttachments(context.Background(), client, msg)
+	if err != nil {
+		t.Fatalf("expected unmatched template PDF to be skipped, got error: %v", err)
+	}
+	if len(trades) != 0 {
+		t.Fatalf("expected 0 trades, got %d", len(trades))
+	}
+}
+
+func TestGmailSyncUsesUserCreatedAtWhenLastSyncIsNil(t *testing.T) {
+	createdAt := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	user := &models.Users{
+		Id:               10,
+		CreatedAt:        createdAt,
+		LastGmailSyncAt:  nil,
+		GmailSyncEnabled: true,
+	}
+	authRepo := &gmailAuthRepo{user: user}
+	spy := &gmailSelectorParser{
+		selectors: []parser.EmailMetadata{{Subject: "Trade Confirmation"}},
+	}
+
+	var capturedQuery string
+	client := fakeGmail(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/messages") {
+			capturedQuery = r.URL.Query().Get("q")
+			gmailJSON(t, w, &gmail.ListMessagesResponse{})
+			return
+		}
+	})
+
+	service := &GmailServiceImpl{
+		AuthRepository: authRepo,
+		TradeParser:    spy,
+	}
+
+	_, err := service.syncTradeConfirmations(context.Background(), client, user, time.Now())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedAfter := "after:2026/11/04"
+	if !strings.Contains(capturedQuery, expectedAfter) {
+		t.Fatalf("expected query to contain %q for user created on %v, got %q", expectedAfter, createdAt, capturedQuery)
+	}
+}
+
+func TestGmailSyncIntradayTradesBatch(t *testing.T) {
+	tradeDate := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
+	user := &models.Users{
+		Id:               20,
+		CreatedAt:        tradeDate.AddDate(0, 0, -2),
+		GmailSyncEnabled: true,
+	}
+	authRepo := &gmailAuthRepo{user: user}
+
+	spy := &gmailSelectorParser{
+		selectors: []parser.EmailMetadata{{Subject: "Trade Confirmation"}},
+	}
+	spy.parseEmail = func(meta parser.EmailMetadata) ([]dto.ParsedTrade, error) {
+		return []dto.ParsedTrade{
+			{Ticker: "BBCA", Price: 9000, Lot: 100, Type: "BUY", Date: tradeDate, BrokerName: "Stockbit", Tax: 1350},
+			{Ticker: "BBCA", Price: 9100, Lot: 100, Type: "SELL", Date: tradeDate, BrokerName: "Stockbit", Tax: 2275},
+		}, nil
+	}
+
+	txRepo := &mockTxRepo{}
+	brokerRepo := &mockBrokerRepo{}
+
+	service := &GmailServiceImpl{
+		AuthRepository:  authRepo,
+		TradeParser:     spy,
+		TransactionRepo: txRepo,
+		BrokerRepo:      brokerRepo,
+	}
+
+	client := fakeGmail(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/messages") {
+			gmailJSON(t, w, &gmail.ListMessagesResponse{
+				Messages: []*gmail.Message{{Id: "email1"}},
+			})
+			return
+		}
+		gmailJSON(t, w, &gmail.Message{
+			Id: "email1",
+			Payload: &gmail.MessagePart{
+				Filename: "tc.pdf",
+				Body:     &gmail.MessagePartBody{Data: "UERG"},
+				Headers: []*gmail.MessagePartHeader{
+					{Name: "Subject", Value: "Trade Confirmation"},
+					{Name: "Date", Value: tradeDate.Format(time.RFC1123Z)},
+				},
+			},
+		})
+	})
+
+	resp, err := service.syncTradeConfirmations(context.Background(), client, user, time.Now())
+	if err != nil {
+		t.Fatalf("unexpected sync error: %v", err)
+	}
+	if resp.TradesFound != 2 {
+		t.Fatalf("expected 2 trades found, got %d", resp.TradesFound)
+	}
+	if resp.TradesSynced != 2 {
+		t.Fatalf("expected 2 trades synced, got %d", resp.TradesSynced)
+	}
+	if len(txRepo.savedTransactions) != 2 {
+		t.Fatalf("expected 2 transactions saved in batch, got %d", len(txRepo.savedTransactions))
+	}
+}

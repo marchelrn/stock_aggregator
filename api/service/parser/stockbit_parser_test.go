@@ -94,6 +94,9 @@ Payment due to you IDR
 
 	// Trade 1: BUY PART
 	buyTrade := trades[0]
+	if buyTrade.RefNo != "0033568" {
+		t.Errorf("expected RefNo 0033568, got %s", buyTrade.RefNo)
+	}
 	if buyTrade.Ticker != "PART" {
 		t.Errorf("expected ticker PART, got %s", buyTrade.Ticker)
 	}
@@ -120,6 +123,9 @@ Payment due to you IDR
 
 	// Trade 2: SELL PART
 	sellTrade := trades[1]
+	if sellTrade.RefNo != "0167201" {
+		t.Errorf("expected RefNo 0167201, got %s", sellTrade.RefNo)
+	}
 	if sellTrade.Ticker != "PART" {
 		t.Errorf("expected ticker PART, got %s", sellTrade.Ticker)
 	}
