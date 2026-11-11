@@ -141,6 +141,7 @@ export default function MarketPage() {
   }, [selected, revision])
 
   const movers = useMemo(() => getWatchlistMovers(rows), [rows])
+  const selectedRow = useMemo(() => rows.find((r) => r.ticker === selected), [rows, selected])
   const visibleRows = useMemo(() => {
     const filtered = rows.filter((row) => row.ticker.includes(query.trim().toUpperCase()))
     if (sort === 'change') filtered.sort((a, b) => (b.quote?.change_percent ?? -Infinity) - (a.quote?.change_percent ?? -Infinity))
@@ -201,12 +202,13 @@ export default function MarketPage() {
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[640px] text-sm">
             <thead className="bg-slate-50 text-xs text-slate-500">
-              <tr>{['Emiten', 'Harga terakhir', 'Perubahan', 'Prev Close', 'Lot dimiliki', 'Broker'].map((label) => <th key={label} className="p-3 text-left">{label}</th>)}</tr>
+              <tr>{['Emiten', 'Sektor', 'Harga terakhir', 'Perubahan', 'Prev Close', 'Lot dimiliki', 'Broker'].map((label) => <th key={label} className="p-3 text-left">{label}</th>)}</tr>
             </thead>
             <tbody>
               {visibleRows.map((row) => (
                 <tr key={row.ticker} className={row.ticker === selected ? 'bg-teal-50' : 'hover:bg-slate-50'}>
                   <td className="border-b border-slate-100 p-3"><button type="button" aria-pressed={row.ticker === selected} onClick={() => setSelected(row.ticker)} className="font-semibold text-teal-800 underline decoration-dotted underline-offset-4">{row.ticker}</button></td>
+                  <td className="border-b border-slate-100 p-3 text-xs text-slate-600">{row.sector || '—'}</td>
                   <td className="border-b border-slate-100 p-3" title={`Cache harga: ${marketTime(row.quote?.updated_at)}`}>{money(row.quote?.price)}</td>
                   <td className={`border-b border-slate-100 p-3 ${row.quote ? plClass(row.quote.change_percent) : 'text-slate-500'}`}>{row.quote ? `${formatNumber(row.quote.change)} (${formatPercent(row.quote.change_percent)})` : '—'}</td>
                   <td className="border-b border-slate-100 p-3">{money(row.quote?.previous_close)}</td>
@@ -214,7 +216,7 @@ export default function MarketPage() {
                   <td className="border-b border-slate-100 p-3 text-xs text-slate-600">{row.brokers.join(', ') || '—'}</td>
                 </tr>
               ))}
-              {visibleRows.length === 0 && <tr><td colSpan={6} className="p-6 text-center text-slate-500">
+              {visibleRows.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-slate-500">
                 {loading ? 'Memuat saham yang dimiliki...' : rows.length > 0 ? 'Tidak ada ticker yang cocok.' : error ? 'Watchlist belum tersedia.' : <>Belum ada saham yang dimiliki. <Link to="/manage" className="text-teal-700 underline">Kelola broker</Link></>}
               </td></tr>}
             </tbody>
@@ -227,7 +229,7 @@ export default function MarketPage() {
         {detailLoading && <p role="status" className="mt-4 text-sm text-slate-500">Mengambil detail dan histori harga...</p>}
         {detailError && <p role="alert" className="mt-4 text-sm text-rose-700">{detailError} Gunakan Refresh untuk mencoba lagi.</p>}
         {detail && <>
-          <p className="mt-1 text-sm text-slate-500">{detail.name || selected} · {detail.exchange || 'Bursa tidak tersedia'} · {detail.currency || 'Mata uang tidak tersedia'}</p>
+          <p className="mt-1 text-sm text-slate-500">{detail.name || selected} · {selectedRow?.sector ? `${selectedRow.sector} · ` : ''}{detail.exchange || 'Bursa tidak tersedia'} · {detail.currency || 'Mata uang tidak tersedia'}</p>
           <p className="mt-3 text-2xl font-bold">{money(detail.price)} <span className={`text-sm ${detail.change_percent == null ? 'text-slate-500' : plClass(detail.change_percent)}`}>{detail.change_percent == null ? '—' : formatPercent(detail.change_percent)}</span></p>
           <p className="mt-1 text-xs text-slate-500">Waktu harga Yahoo: {marketTime(detail.market_time)} · Diambil server: {marketTime(detail.fetched_at)}</p>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

@@ -2,6 +2,7 @@ import type { Holding, StockPrice, StockPriceMap } from '../types'
 
 export interface WatchlistRow {
   ticker: string
+  sector?: string | null
   lot: number
   brokers: string[]
   quote: StockPrice | null
@@ -13,7 +14,10 @@ export function buildWatchlist(holdings: Holding[], prices: StockPriceMap): Watc
     const ticker = holding.ticker.trim().toUpperCase()
     const lot = Number(holding.lot)
     if (!ticker || !Number.isFinite(lot) || lot <= 0) continue
-    const row = rows.get(ticker) ?? { ticker, lot: 0, brokers: [], quote: prices[ticker] ?? null }
+    const row = rows.get(ticker) ?? { ticker, sector: holding.sector || prices[ticker]?.sector || null, lot: 0, brokers: [], quote: prices[ticker] ?? null }
+    if (!row.sector && holding.sector) {
+      row.sector = holding.sector
+    }
     row.lot += lot
     if (holding.broker_name && !row.brokers.includes(holding.broker_name)) {
       row.brokers.push(holding.broker_name)

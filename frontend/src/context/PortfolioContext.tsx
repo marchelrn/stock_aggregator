@@ -50,6 +50,7 @@ interface PortfolioContextValue {
     broker_id: number
     broker_name?: string
   }) => Promise<boolean>
+  syncStockSectors: () => Promise<boolean>
 }
 
 const initialState: PortfolioState = {
@@ -324,6 +325,19 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     [setStatus],
   )
 
+  const syncStockSectors = useCallback(async (): Promise<boolean> => {
+    try {
+      setStatus('Menyinkronkan data sektor dari Yahoo Finance...')
+      await api('/my/stocks/sync-sectors', { method: 'POST' })
+      setStatus('Data sektor berhasil disinkronkan dari Yahoo Finance.')
+      await loadDashboard({ silent: true })
+      return true
+    } catch (error) {
+      setStatus((error as Error).message, true)
+      return false
+    }
+  }, [setStatus, loadDashboard])
+
   const value = useMemo<PortfolioContextValue>(
     () => ({
       state,
@@ -339,6 +353,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       loadTransactionHistory,
       clearLiveStockPrices,
       addStock,
+      syncStockSectors,
     }),
     [
       state,
@@ -354,6 +369,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       loadTransactionHistory,
       clearLiveStockPrices,
       addStock,
+      syncStockSectors,
     ],
   )
 

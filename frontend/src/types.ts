@@ -18,6 +18,7 @@ export interface Holding {
 
 export interface StockPrice {
   ticker: string
+  sector?: string | null
   price: number
   previous_close: number
   change: number
@@ -49,6 +50,7 @@ export type StockPriceMap = Record<string, StockPrice>
 
 export interface TickerSummary {
   ticker: string
+  sector?: string | null
   total_lot: number
   total_shares: number
   total_cost: number

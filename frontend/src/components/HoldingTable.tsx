@@ -52,7 +52,7 @@ export default function HoldingTable({
         <tbody>
           {!holdings || holdings.length === 0 ? (
             <tr>
-              <td colSpan={6} className="p-2 text-center text-sm text-slate-500">
+              <td colSpan={5} className="p-2 text-center text-sm text-slate-500">
                 Pilih broker untuk melihat holding.
               </td>
             </tr>
@@ -69,7 +69,7 @@ export default function HoldingTable({
                     {holding.broker_name}
                   </td>
                   <td className="border-b border-slate-100 p-2 text-sm text-center">
-                    {holding.sector || '-'}
+                    {holding.sector || summaryMap.get(holding.ticker.toUpperCase())?.sector || '-'}
                   </td>
                   <td className="border-b border-slate-100 p-2 text-sm text-center">
                     {formatCurrency(marketValue)}

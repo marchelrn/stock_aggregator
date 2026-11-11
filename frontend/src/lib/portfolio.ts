@@ -47,6 +47,7 @@ export function buildSummary(
     const prev: TickerSummary =
       tickerMap.get(ticker) || {
         ticker,
+        sector: h.sector || priceMap?.[ticker]?.sector || null,
         total_lot: 0,
         total_shares: 0,
         total_cost: 0,
@@ -58,6 +59,10 @@ export function buildSummary(
         profit_pct: 0,
         weight: 0,
       }
+
+    if (!prev.sector && h.sector) {
+      prev.sector = h.sector
+    }
 
     const shares = num(h.lot) * 100
     const avgPrice = num(h.avg_price)
@@ -124,7 +129,12 @@ export function buildSummary(
 
     broker.stock_value += marketValue
     broker.total_value = broker.cash + broker.stock_value
-    broker.holdings.push(h)
+    const tickerKey = String(h.ticker || '').toUpperCase()
+    const resolvedSector = h.sector || tickerMap.get(tickerKey)?.sector || priceMap?.[tickerKey]?.sector || null
+    broker.holdings.push({
+      ...h,
+      sector: resolvedSector,
+    })
   }
 
   const brokersOut = Array.from(brokerMap.values())

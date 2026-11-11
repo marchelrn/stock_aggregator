@@ -1,16 +1,24 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { usePortfolio } from '../context/PortfolioContext'
 import StatusBar from '../components/StatusBar'
 import KpiGrid from '../components/KpiGrid'
 import BrokerCards from '../components/BrokerCards'
 import TickerTable from '../components/TickerTable'
+import SectorAllocation from '../components/SectorAllocation'
 
 export default function DashboardPage() {
-  const { state, status, isError, loadDashboard } = usePortfolio()
+  const { state, status, isError, loadDashboard, syncStockSectors } = usePortfolio()
+  const [syncingSectors, setSyncingSectors] = useState(false)
 
   useEffect(() => {
     loadDashboard()
   }, [loadDashboard])
+
+  const handleSyncSectors = async () => {
+    setSyncingSectors(true)
+    await syncStockSectors()
+    setSyncingSectors(false)
+  }
 
   const userName = state.user?.name ?? localStorage.getItem('userName') ?? undefined
 
@@ -49,6 +57,21 @@ export default function DashboardPage() {
           <h2 className="text-xl font-semibold">Broker Allocation</h2>
         </div>
         <BrokerCards summary={state.summary} />
+      </section>
+
+      <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-xl font-semibold">Sector Allocation</h2>
+          <button
+            type="button"
+            className="rounded-lg border border-teal-600 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-800 hover:bg-teal-100 disabled:opacity-50 transition"
+            onClick={handleSyncSectors}
+            disabled={syncingSectors}
+          >
+            {syncingSectors ? 'Menyinkronkan...' : 'Sync Sektor Yahoo'}
+          </button>
+        </div>
+        <SectorAllocation holdings={state.holdings} tickerSummaries={state.summary?.by_ticker ?? []} />
       </section>
 
       <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
