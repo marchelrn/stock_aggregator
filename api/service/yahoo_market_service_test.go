@@ -273,3 +273,55 @@ func TestParseMarketPreviousClose(t *testing.T) {
 		t.Fatalf("zero previous close must not divide by zero: %+v", data)
 	}
 }
+
+func TestGetSectorAndGetSectors(t *testing.T) {
+	s := testMarketService(t, func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/v1/finance/search") {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		q := r.URL.Query().Get("q")
+		switch q {
+		case "BBCA.JK":
+			fmt.Fprint(w, `{"quotes":[{"symbol":"BBCA.JK","sector":"Financial Services","sectorDisp":"Financial Services"}]}`)
+		case "TLKM.JK":
+			fmt.Fprint(w, `{"quotes":[{"symbol":"TLKM.JK","sector":"Communication Services","sectorDisp":""}]}`)
+		default:
+			fmt.Fprint(w, `{"quotes":[]}`)
+		}
+	})
+
+	sec, err := s.GetSector("BBCA")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sec != "Financial Services" {
+		t.Errorf("expected Financial Services, got %s", sec)
+	}
+
+	secTLKM, err := s.GetSector("TLKM.JK")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if secTLKM != "Communication Services" {
+		t.Errorf("expected Communication Services, got %s", secTLKM)
+	}
+
+	secUnknown, err := s.GetSector("UNKNOWN")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if secUnknown != "" {
+		t.Errorf("expected empty sector for UNKNOWN, got %s", secUnknown)
+	}
+
+	sectors, err := s.GetSectors([]string{"BBCA", "TLKM", "UNKNOWN"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sectors["BBCA"] != "Financial Services" {
+		t.Errorf("expected BBCA sector, got %s", sectors["BBCA"])
+	}
+	if sectors["TLKM"] != "Communication Services" {
+		t.Errorf("expected TLKM sector, got %s", sectors["TLKM"])
+	}
+}

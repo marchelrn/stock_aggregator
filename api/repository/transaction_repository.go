@@ -94,9 +94,15 @@ func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.
 			avgPriceWithTax := amountDone / shares
 
 			if err == gorm.ErrRecordNotFound {
+				var defaultSector string
+				_ = tx.Table("stocks").Select("sector").Where("ticker = ? AND sector IS NOT NULL AND sector != ''", payload.Ticker).Limit(1).Scan(&defaultSector).Error
+				if defaultSector == "" {
+					_ = tx.Table("stock_prices").Select("sector").Where("ticker = ? AND sector IS NOT NULL AND sector != ''", payload.Ticker).Limit(1).Scan(&defaultSector).Error
+				}
 				stock = models.StockHolding{
 					UserID:     payload.UserID,
 					Ticker:     payload.Ticker,
+					Sector:     defaultSector,
 					Lot:        payload.Lot,
 					AvgPrice:   avgPriceWithTax,
 					BrokerID:   payload.BrokerID,
@@ -376,9 +382,15 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 						return err
 					}
 				} else {
+					var defaultSector string
+					_ = tx.Table("stocks").Select("sector").Where("ticker = ? AND sector IS NOT NULL AND sector != ''", ticker).Limit(1).Scan(&defaultSector).Error
+					if defaultSector == "" {
+						_ = tx.Table("stock_prices").Select("sector").Where("ticker = ? AND sector IS NOT NULL AND sector != ''", ticker).Limit(1).Scan(&defaultSector).Error
+					}
 					stock = models.StockHolding{
 						UserID:     userID,
 						Ticker:     ticker,
+						Sector:     defaultSector,
 						Lot:        newLot,
 						AvgPrice:   newAvg,
 						BrokerID:   key.brokerID,

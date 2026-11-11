@@ -16,10 +16,11 @@ type StocksService struct {
 	StocksRepository      contract.StocksRepository
 	BrokerRepository      contract.BrokerRepository
 	TransactionRepository contract.TransactionRepository
+	YahooService          contract.YahooService
 }
 
-func ImplStocksService(stocksRepo contract.StocksRepository, brokerRepo contract.BrokerRepository, txRepo contract.TransactionRepository) contract.StocksService {
-	return &StocksService{StocksRepository: stocksRepo, BrokerRepository: brokerRepo, TransactionRepository: txRepo}
+func ImplStocksService(stocksRepo contract.StocksRepository, brokerRepo contract.BrokerRepository, txRepo contract.TransactionRepository, yahooSvc contract.YahooService) contract.StocksService {
+	return &StocksService{StocksRepository: stocksRepo, BrokerRepository: brokerRepo, TransactionRepository: txRepo, YahooService: yahooSvc}
 }
 
 func (s *StocksService) GetAllStocks(userID uint, limiter int) (*dto.StocksResponse, error) {
@@ -30,11 +31,34 @@ func (s *StocksService) GetAllStocks(userID uint, limiter int) (*dto.StocksRespo
 		return nil, errs.InternalServerError("Failed to retrieve stock data")
 	}
 
+	if s.YahooService != nil {
+		missingTickers := make([]string, 0)
+		for _, stock := range stocks {
+			if stock.Sector == "" && stock.Ticker != "" {
+				missingTickers = append(missingTickers, stock.Ticker)
+			}
+		}
+		if len(missingTickers) > 0 {
+			sectors, _ := s.YahooService.GetSectors(missingTickers)
+			if len(sectors) > 0 {
+				for i := range stocks {
+					if stocks[i].Sector == "" {
+						if sec, ok := sectors[stocks[i].Ticker]; ok && sec != "" {
+							stocks[i].Sector = sec
+							_ = s.StocksRepository.UpdateSectorByTicker(stocks[i].Ticker, sec)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	stocksData := make([]dto.StocksData, 0, len(stocks))
 	for _, stock := range stocks {
 		stocksData = append(stocksData, dto.StocksData{
 			Id:         stock.Id,
 			Ticker:     stock.Ticker,
+			Sector:     stock.Sector,
 			Lot:        stock.Lot,
 			AvgPrice:   stock.AvgPrice,
 			BrokerID:   stock.BrokerID,
@@ -65,11 +89,34 @@ func (s *StocksService) GetStocks(userID uint, stockTicker []string) (*dto.Stock
 		return nil, errs.NotFound("Stock not found")
 	}
 
+	if s.YahooService != nil {
+		missingTickers := make([]string, 0)
+		for _, stock := range stocks {
+			if stock.Sector == "" && stock.Ticker != "" {
+				missingTickers = append(missingTickers, stock.Ticker)
+			}
+		}
+		if len(missingTickers) > 0 {
+			sectors, _ := s.YahooService.GetSectors(missingTickers)
+			if len(sectors) > 0 {
+				for i := range stocks {
+					if stocks[i].Sector == "" {
+						if sec, ok := sectors[stocks[i].Ticker]; ok && sec != "" {
+							stocks[i].Sector = sec
+							_ = s.StocksRepository.UpdateSectorByTicker(stocks[i].Ticker, sec)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	stocksData := make([]dto.StocksData, 0, len(stocks))
 	for _, stock := range stocks {
 		stocksData = append(stocksData, dto.StocksData{
 			Id:         stock.Id,
 			Ticker:     stock.Ticker,
+			Sector:     stock.Sector,
 			Lot:        stock.Lot,
 			AvgPrice:   stock.AvgPrice,
 			BrokerID:   stock.BrokerID,
@@ -90,6 +137,7 @@ func (s *StocksService) GetStocks(userID uint, stockTicker []string) (*dto.Stock
 func (s *StocksService) AddStockData(userID uint, payload *dto.StocksRequest) (*dto.StocksResponse, error) {
 	stock := &dto.StocksData{
 		Ticker:     strings.ToUpper(strings.TrimSpace(payload.Ticker)),
+		Sector:     strings.TrimSpace(payload.Sector),
 		Lot:        payload.Lot,
 		AvgPrice:   payload.AvgPrice,
 		BrokerID:   payload.BrokerID,
@@ -110,6 +158,12 @@ func (s *StocksService) AddStockData(userID uint, payload *dto.StocksRequest) (*
 		return nil, errs.BadRequest("broker_id is required")
 	}
 
+	if stock.Sector == "" && s.YahooService != nil {
+		if sec, err := s.YahooService.GetSector(stock.Ticker); err == nil && sec != "" {
+			stock.Sector = sec
+		}
+	}
+
 	existing, err := s.StocksRepository.GetStockByTickerAndBroker(userID, stock.Ticker, stock.BrokerID)
 	if err == nil {
 		if existing.Lot > 0 {
@@ -117,6 +171,9 @@ func (s *StocksService) AddStockData(userID uint, payload *dto.StocksRequest) (*
 		}
 		existing.Lot = stock.Lot
 		existing.AvgPrice = stock.AvgPrice
+		if stock.Sector != "" {
+			existing.Sector = stock.Sector
+		}
 		if stock.BrokerName != "" {
 			existing.BrokerName = stock.BrokerName
 		}
@@ -130,6 +187,7 @@ func (s *StocksService) AddStockData(userID uint, payload *dto.StocksRequest) (*
 			StocksData: []dto.StocksData{{
 				Id:         updatedStock.Id,
 				Ticker:     updatedStock.Ticker,
+				Sector:     updatedStock.Sector,
 				Lot:        updatedStock.Lot,
 				AvgPrice:   updatedStock.AvgPrice,
 				BrokerID:   updatedStock.BrokerID,
@@ -145,6 +203,7 @@ func (s *StocksService) AddStockData(userID uint, payload *dto.StocksRequest) (*
 	addedStock, err := s.StocksRepository.AddStockData(&models.StockHolding{
 		UserID:     userID,
 		Ticker:     stock.Ticker,
+		Sector:     stock.Sector,
 		Lot:        stock.Lot,
 		AvgPrice:   stock.AvgPrice,
 		BrokerID:   stock.BrokerID,
@@ -160,6 +219,7 @@ func (s *StocksService) AddStockData(userID uint, payload *dto.StocksRequest) (*
 		StocksData: []dto.StocksData{{
 			Id:         addedStock.Id,
 			Ticker:     addedStock.Ticker,
+			Sector:     addedStock.Sector,
 			Lot:        addedStock.Lot,
 			AvgPrice:   addedStock.AvgPrice,
 			BrokerID:   addedStock.BrokerID,
@@ -201,8 +261,13 @@ func (s *StocksService) UpdateStock(userID uint, stockTicker []string, payload *
 		stocks.BrokerName = payload.BrokerName
 	}
 
+	if payload.Sector != "" {
+		stocks.Sector = payload.Sector
+	}
+
 	updatedStock, err := s.StocksRepository.UpdateStockData(userID, stockTicker, &models.StockHolding{
 		Ticker:     stocks.Ticker,
+		Sector:     stocks.Sector,
 		Lot:        stocks.Lot,
 		AvgPrice:   stocks.AvgPrice,
 		BrokerID:   stocks.BrokerID,
@@ -218,6 +283,7 @@ func (s *StocksService) UpdateStock(userID uint, stockTicker []string, payload *
 		StocksData: []dto.StocksData{{
 			Id:         updatedStock.Id,
 			Ticker:     updatedStock.Ticker,
+			Sector:     updatedStock.Sector,
 			Lot:        updatedStock.Lot,
 			AvgPrice:   updatedStock.AvgPrice,
 			BrokerID:   updatedStock.BrokerID,
@@ -254,4 +320,51 @@ func (s *StocksService) DeleteStockData(userID uint, stockTicker []string) (*dto
 		Message:    "Stock data deleted successfully",
 	}
 	return response, nil
+}
+
+func (s *StocksService) SyncStockSectors(userID uint) (*dto.StocksResponse, error) {
+	stocks, err := s.StocksRepository.GetAllStocks(userID, 0)
+	if err != nil {
+		return nil, errs.InternalServerError("Failed to retrieve stock data")
+	}
+
+	tickers := make([]string, 0, len(stocks))
+	for _, st := range stocks {
+		if st.Ticker != "" {
+			tickers = append(tickers, st.Ticker)
+		}
+	}
+
+	if len(tickers) > 0 && s.YahooService != nil {
+		sectors, err := s.YahooService.GetSectors(tickers)
+		if err == nil && len(sectors) > 0 {
+			for i := range stocks {
+				if sec, ok := sectors[stocks[i].Ticker]; ok && sec != "" {
+					stocks[i].Sector = sec
+					_ = s.StocksRepository.UpdateSectorByTicker(stocks[i].Ticker, sec)
+				}
+			}
+		}
+	}
+
+	stocksData := make([]dto.StocksData, 0, len(stocks))
+	for _, stock := range stocks {
+		stocksData = append(stocksData, dto.StocksData{
+			Id:         stock.Id,
+			Ticker:     stock.Ticker,
+			Sector:     stock.Sector,
+			Lot:        stock.Lot,
+			AvgPrice:   stock.AvgPrice,
+			BrokerID:   stock.BrokerID,
+			BrokerName: stock.BrokerName,
+			CreatedAt:  stock.CreatedAt,
+			UpdatedAt:  stock.UpdatedAt,
+		})
+	}
+
+	return &dto.StocksResponse{
+		StatusCode: http.StatusOK,
+		Message:    "Success synced all stock sectors",
+		StocksData: stocksData,
+	}, nil
 }

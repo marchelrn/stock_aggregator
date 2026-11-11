@@ -94,6 +94,7 @@ func SetupRoutes(s *contract.Service) *gin.Engine {
 		protected.POST("my/stock", stockController.AddStockData)
 		protected.PUT("my/stock/:ticker", stockController.UpdateStock)
 		protected.DELETE("my/stock/:ticker", stockController.DeleteStockData)
+		protected.POST("my/stocks/sync-sectors", stockController.SyncStockSectors)
 
 		// Broker routes
 		protected.GET("/brokers", brokerController.GetAllBrokers)

@@ -24,6 +24,7 @@ func getMigrations() []migration {
 		getAlterUsersAddGmailTokens(),
 		getCreatePDFParsingTemplates(),
 		getAlterTablesAddUserID(),
+		getAlterStocksAddSector(),
 	}
 }
 

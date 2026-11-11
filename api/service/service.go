@@ -16,11 +16,13 @@ func New(repo *contract.Repository) (*contract.Service, error) {
 	mandiriParser := parser.NewMandiriParser()
 	dispatcher := parser.NewBrokerDispatcherParser(metadataParser, stockbitParser, mandiriParser)
 
+	yahooSvc := ImplYahooService(repo.Yahoo)
+
 	return &contract.Service{
-		Stocks:      ImplStocksService(repo.Stocks, repo.Brokers, repo.Transactions),
+		Stocks:      ImplStocksService(repo.Stocks, repo.Brokers, repo.Transactions, yahooSvc),
 		Brokers:     ImplBrokersService(repo.Brokers),
 		Transaction: ImplTransactionService(repo),
-		Yahoo:       ImplYahooService(repo.Yahoo),
+		Yahoo:       yahooSvc,
 		Auth:        ImplAuthService(repo.Auth),
 		Gmail:       ImplGmailService(repo.Auth, dispatcher, repo.Transactions, repo.Brokers),
 	}, nil

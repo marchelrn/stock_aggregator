@@ -109,6 +109,7 @@ func (s *BrokersService) GetBrokersDetails(userID uint, brokerName []string) (*d
 			stocksData = append(stocksData, dto.StocksData{
 				Id:         stock.Id,
 				Ticker:     stock.Ticker,
+				Sector:     stock.Sector,
 				Lot:        stock.Lot,
 				AvgPrice:   stock.AvgPrice,
 				BrokerID:   stock.BrokerID,
@@ -153,6 +154,7 @@ func (s *BrokersService) GetAllBrokersDetails(userID uint) (*dto.BrokersResponse
 		holdingsMap[stock.BrokerID] = append(holdingsMap[stock.BrokerID], dto.StocksData{
 			Id:         stock.Id,
 			Ticker:     stock.Ticker,
+			Sector:     stock.Sector,
 			Lot:        stock.Lot,
 			AvgPrice:   stock.AvgPrice,
 			BrokerID:   stock.BrokerID,

@@ -37,6 +37,8 @@ type StocksRepository interface {
 	AddStockData(payload *models.StockHolding) (*models.StockHolding, error)
 	UpdateStockData(userID uint, ticker []string, payload *models.StockHolding) (*models.StockHolding, error)
 	DeleteStockData(userID uint, stockTicker []string) error
+	UpdateStockSector(userID uint, ticker string, sector string) error
+	UpdateSectorByTicker(ticker string, sector string) error
 }
 
 type BrokerRepository interface {
@@ -64,4 +66,5 @@ type YahooRepository interface {
 	GetPrices(tickers []string) (map[string]*models.StockPrice, error)
 	GetAllPrices() ([]models.StockPrice, error)
 	SavePrice(price *models.StockPrice) error
+	UpdateSector(ticker string, sector string) error
 }

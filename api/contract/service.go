@@ -35,6 +35,7 @@ type StocksService interface {
 	AddStockData(userID uint, payload *dto.StocksRequest) (*dto.StocksResponse, error)
 	UpdateStock(userID uint, stockTicker []string, payload *dto.StocksRequest) (*dto.StocksResponse, error)
 	DeleteStockData(userID uint, stockTicker []string) (*dto.StocksResponse, error)
+	SyncStockSectors(userID uint) (*dto.StocksResponse, error)
 }
 
 type BrokersService interface {
@@ -60,4 +61,6 @@ type YahooService interface {
 	GetPrice(ticker string) (*models.StockPrice, error)
 	GetPrices(tickers []string) (prices map[string]*models.StockPrice, failed map[string]string, err error)
 	GetAllPrices() ([]models.StockPrice, error)
+	GetSector(ticker string) (string, error)
+	GetSectors(tickers []string) (map[string]string, error)
 }

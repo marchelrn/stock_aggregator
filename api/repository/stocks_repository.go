@@ -65,6 +65,9 @@ func (r *StocksRepository) UpdateStockData(userID uint, ticker []string, payload
 	}
 
 	stock.Ticker = payload.Ticker
+	if payload.Sector != "" {
+		stock.Sector = payload.Sector
+	}
 	stock.Lot = payload.Lot
 	stock.AvgPrice = payload.AvgPrice
 	stock.BrokerID = payload.BrokerID
@@ -89,4 +92,12 @@ func (r *StocksRepository) GetStockById(userID uint, id int) (*models.StockHoldi
 		return nil, err
 	}
 	return &stock, nil
+}
+
+func (r *StocksRepository) UpdateStockSector(userID uint, ticker string, sector string) error {
+	return r.db.Model(&models.StockHolding{}).Where("user_id = ? AND ticker = ?", userID, ticker).Update("sector", sector).Error
+}
+
+func (r *StocksRepository) UpdateSectorByTicker(ticker string, sector string) error {
+	return r.db.Model(&models.StockHolding{}).Where("ticker = ?", ticker).Update("sector", sector).Error
 }

@@ -215,3 +215,22 @@ func (s *StocksController) DeleteStockData(c *gin.Context) {
 		"status":  response.StatusCode,
 	})
 }
+
+func (s *StocksController) SyncStockSectors(c *gin.Context) {
+	userID, err := getUserID(c)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	response, err := s.service.SyncStockSectors(userID)
+	if err != nil {
+		HandleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": response.Message,
+		"data":    response.StocksData,
+	})
+}

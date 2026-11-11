@@ -34,13 +34,31 @@ func ImplYahooService(repo contract.YahooRepository) contract.YahooService {
 }
 
 func (s *YahooService) GetPrice(ticker string) (*models.StockPrice, error) {
-	if cached, err := s.YahooRepository.GetPrice(ticker); err == nil {
-		if time.Since(cached.UpdatedAt) < 5*time.Minute {
-			return cached, nil
+	ticker = strings.ToUpper(strings.TrimSpace(ticker))
+	ticker = strings.TrimSuffix(ticker, ".JK")
+	if ticker == "" {
+		return nil, errs.BadRequest("ticker is required")
+	}
+
+	if s.YahooRepository != nil {
+		if cached, err := s.YahooRepository.GetPrice(ticker); err == nil && cached != nil {
+			if time.Since(cached.UpdatedAt) < 5*time.Minute {
+				if cached.Sector == "" {
+					if sec, err := s.GetSector(ticker); err == nil && sec != "" {
+						cached.Sector = sec
+						_ = s.YahooRepository.UpdateSector(ticker, sec)
+					}
+				}
+				return cached, nil
+			}
 		}
 	}
 
-	url := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s.JK", ticker)
+	baseURL := s.marketBaseURL
+	if baseURL == "" {
+		baseURL = "https://query1.finance.yahoo.com"
+	}
+	url := fmt.Sprintf("%s/v8/finance/chart/%s.JK", baseURL, ticker)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -48,7 +66,12 @@ func (s *YahooService) GetPrice(ticker string) (*models.StockPrice, error) {
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := s.marketClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch price for %s: %w", ticker, err)
 	}
@@ -79,8 +102,11 @@ func (s *YahooService) GetPrice(ticker string) (*models.StockPrice, error) {
 		changePct = (change / meta.PreviousClose) * 100
 	}
 
+	sector, _ := s.GetSector(ticker)
+
 	price := &models.StockPrice{
 		Ticker:        ticker,
+		Sector:        sector,
 		Price:         meta.RegularMarketPrice,
 		PreviousClose: meta.PreviousClose,
 		Change:        change,
@@ -90,9 +116,11 @@ func (s *YahooService) GetPrice(ticker string) (*models.StockPrice, error) {
 
 	price.UpdatedAt = time.Now()
 	// Update cache in database over memory cache
-	if err := s.YahooRepository.SavePrice(price); err != nil {
-		// Just log or ignore since we can still return the fetched price
-		fmt.Printf("Failed to cache price for %s: %v\n", ticker, err)
+	if s.YahooRepository != nil {
+		if err := s.YahooRepository.SavePrice(price); err != nil {
+			// Just log or ignore since we can still return the fetched price
+			fmt.Printf("Failed to cache price for %s: %v\n", ticker, err)
+		}
 	}
 
 	return price, nil
@@ -164,4 +192,123 @@ func (s *YahooService) GetPrices(tickers []string) (map[string]*models.StockPric
 	}
 
 	return prices, failed, nil
+}
+
+func (s *YahooService) GetSector(ticker string) (string, error) {
+	ticker = strings.ToUpper(strings.TrimSpace(ticker))
+	ticker = strings.TrimSuffix(ticker, ".JK")
+	if ticker == "" {
+		return "", errs.BadRequest("ticker is required")
+	}
+
+	// 1. Check database cache
+	if s.YahooRepository != nil {
+		if cached, err := s.YahooRepository.GetPrice(ticker); err == nil && cached != nil && cached.Sector != "" {
+			return cached.Sector, nil
+		}
+	}
+
+	// 2. Fetch from Yahoo Finance Search API
+	baseURL := s.marketBaseURL
+	if baseURL == "" {
+		baseURL = "https://query1.finance.yahoo.com"
+	}
+	url := fmt.Sprintf("%s/v1/finance/search?q=%s.JK", baseURL, ticker)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
+	req.Header.Set("Accept", "application/json")
+
+	client := s.marketClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to search sector for %s: %w", ticker, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to fetch sector for %s, status code: %d", ticker, resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var searchRes struct {
+		Quotes []struct {
+			Symbol     string `json:"symbol"`
+			Sector     string `json:"sector"`
+			SectorDisp string `json:"sectorDisp"`
+		} `json:"quotes"`
+	}
+
+	if err := json.Unmarshal(body, &searchRes); err != nil {
+		return "", fmt.Errorf("failed to parse search response: %w", err)
+	}
+
+	targetJK := ticker + ".JK"
+	var sector string
+	for _, q := range searchRes.Quotes {
+		if strings.EqualFold(q.Symbol, targetJK) || strings.EqualFold(q.Symbol, ticker) || strings.EqualFold(strings.TrimSuffix(q.Symbol, ".JK"), ticker) {
+			sector = q.SectorDisp
+			if sector == "" {
+				sector = q.Sector
+			}
+			break
+		}
+	}
+
+	if sector != "" && s.YahooRepository != nil {
+		_ = s.YahooRepository.UpdateSector(ticker, sector)
+	}
+
+	return sector, nil
+}
+
+func (s *YahooService) GetSectors(tickers []string) (map[string]string, error) {
+	result := make(map[string]string)
+	if len(tickers) == 0 {
+		return result, nil
+	}
+
+	seen := make(map[string]struct{}, len(tickers))
+	unique := make([]string, 0, len(tickers))
+	for _, t := range tickers {
+		t = strings.ToUpper(strings.TrimSpace(t))
+		t = strings.TrimSuffix(t, ".JK")
+		if t == "" {
+			continue
+		}
+		if _, ok := seen[t]; ok {
+			continue
+		}
+		seen[t] = struct{}{}
+		unique = append(unique, t)
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for _, ticker := range unique {
+		wg.Add(1)
+		go func(t string) {
+			defer wg.Done()
+			sector, err := s.GetSector(t)
+			if err == nil && sector != "" {
+				mu.Lock()
+				result[t] = sector
+				mu.Unlock()
+			}
+		}(ticker)
+	}
+
+	wg.Wait()
+	return result, nil
 }

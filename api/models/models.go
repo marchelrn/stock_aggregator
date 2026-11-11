@@ -22,6 +22,7 @@ type StockHolding struct {
 	Id         int       `json:"stock_id" gorm:"column:id;primaryKey"`
 	UserID     uint      `json:"user_id" gorm:"column:user_id;index"`
 	Ticker     string    `json:"ticker"`
+	Sector     string    `json:"sector" gorm:"column:sector"`
 	Lot        int       `json:"lot"`
 	AvgPrice   float64   `json:"avg_price"`
 	BrokerID   int       `json:"broker_id"`
@@ -35,6 +36,7 @@ type StockHolding struct {
 type StockPrice struct {
 	Id            int       `json:"id"`
 	Ticker        string    `json:"ticker"`
+	Sector        string    `json:"sector" gorm:"column:sector"`
 	Price         float64   `json:"price"`
 	PreviousClose float64   `json:"previous_close"`
 	Change        float64   `json:"change"`

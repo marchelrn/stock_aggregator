@@ -6,6 +6,7 @@ import "time"
 
 type StocksRequest struct {
 	Ticker     string  `json:"ticker" `
+	Sector     string  `json:"sector,omitempty"`
 	Lot        int     `json:"lot"`
 	AvgPrice   float64 `json:"avg_price"`
 	BrokerID   int     `json:"broker_id"`
@@ -21,6 +22,7 @@ type StocksResponse struct {
 type StocksData struct {
 	Id         int       `json:"id"`
 	Ticker     string    `json:"ticker"`
+	Sector     string    `json:"sector"`
 	Lot        int       `json:"lot"`
 	AvgPrice   float64   `json:"avg_price"`
 	BrokerID   int       `json:"broker_id"`
