@@ -79,7 +79,7 @@ export default function BrokerCards({ summary }: BrokerCardsProps) {
           </div>
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
             <span
-              className="block h-full bg-gradient-to-r from-teal-700 to-emerald-500"
+              className="block h-full bg-teal-600"
               style={{ width: `${Math.max(0, Math.min(100, broker.weight))}%` }}
             ></span>
           </div>

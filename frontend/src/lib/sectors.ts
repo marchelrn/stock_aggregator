@@ -1,6 +1,6 @@
 import type { Holding, TickerSummary } from '../types'
 
-export const UNCLASSIFIED_SECTOR = 'Belum diklasifikasikan'
+export const UNCLASSIFIED_SECTOR = 'Not Yet Classified'
 
 export interface SectorDistribution {
   sector: string

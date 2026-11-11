@@ -67,11 +67,6 @@ export default function SectorAllocation({ holdings = [], tickerSummaries = [] }
           </div>
         </article>
       ))}
-      {sectors.some((sec) => sec.sector === UNCLASSIFIED_SECTOR) && (
-        <p className="mt-2 col-span-full text-xs text-slate-500">
-          Sebagian saham belum memiliki data sektor. Gunakan tombol sync untuk mengambil data sektor dari Yahoo Finance.
-        </p>
-      )}
     </div>
   )
 }

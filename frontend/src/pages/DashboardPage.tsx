@@ -14,11 +14,12 @@ export default function DashboardPage() {
     loadDashboard()
   }, [loadDashboard])
 
-  const handleSyncSectors = async () => {
-    setSyncingSectors(true)
-    await syncStockSectors()
-    setSyncingSectors(false)
-  }
+  // const handleSyncSectors = async () => {
+  //   setSyncingSectors(true)
+  //   await syncStockSectors()
+  //   setSyncingSectors(false)
+  // }
+  //  NEXT IMPLEMENTATION
 
   const userName = state.user?.name ?? localStorage.getItem('userName') ?? undefined
 
@@ -62,14 +63,14 @@ export default function DashboardPage() {
       <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-xl font-semibold">Sector Allocation</h2>
-          <button
+          {/*<button
             type="button"
             className="rounded-lg border border-teal-600 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-800 hover:bg-teal-100 disabled:opacity-50 transition"
             onClick={handleSyncSectors}
             disabled={syncingSectors}
           >
             {syncingSectors ? 'Menyinkronkan...' : 'Sync Sektor Yahoo'}
-          </button>
+          </button>*/}
         </div>
         <SectorAllocation holdings={state.holdings} tickerSummaries={state.summary?.by_ticker ?? []} />
       </section>

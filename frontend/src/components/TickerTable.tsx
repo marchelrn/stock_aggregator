@@ -55,7 +55,6 @@ export default function TickerTable({ summary }: TickerTableProps) {
         <thead>
           <tr className="bg-slate-50 text-slate-500">
             <th className="border-b border-slate-300 p-2 text-left text-xs">Ticker</th>
-            <th className="border-b border-slate-300 p-2 text-left text-xs">Sector</th>
             <th className="border-b border-slate-300 p-2 text-left text-xs">Total Lot</th>
             <th className="border-b border-slate-300 p-2 text-left text-xs">Avg Price</th>
             <th className="border-b border-slate-300 p-2 text-left text-xs">Current Price</th>
@@ -76,7 +75,6 @@ export default function TickerTable({ summary }: TickerTableProps) {
             sortedRows.map((row) => (
               <tr key={row.ticker}>
                 <td className="border-b border-slate-100 p-2 text-sm font-semibold">{row.ticker}</td>
-                <td className="border-b border-slate-100 p-2 text-sm text-slate-600">{row.sector || '-'}</td>
                 <td className="border-b border-slate-100 p-2 text-sm">
                   {formatNumber(row.total_lot, 0)}
                 </td>
