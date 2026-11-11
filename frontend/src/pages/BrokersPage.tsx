@@ -612,7 +612,7 @@ export default function BrokersPage() {
                       onClick={handleAddPendingStock}
                       className="w-full rounded-lg bg-emerald-600 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition"
                     >
-                      + Tambah
+                      Tambah
                     </button>
                   </div>
                 </div>

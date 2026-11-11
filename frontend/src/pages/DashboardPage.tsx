@@ -49,7 +49,7 @@ export default function DashboardPage() {
             Refresh Data
           </button>
         </div>
-        <StatusBar message={status} isError={isError} />
+        {/*<StatusBar message={status} isError={isError} /> FOR DEBBUG ONLY !*/}
         <KpiGrid summary={state.summary} />
       </section>
 

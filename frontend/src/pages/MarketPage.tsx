@@ -153,8 +153,7 @@ export default function MarketPage() {
       <header className={`${panelClass} flex flex-wrap items-start justify-between gap-4`}>
         <div>
           <h1 className="text-2xl font-bold">Market</h1>
-          <p className="mt-2 text-sm text-slate-500">Watchlist otomatis dari saham yang Anda miliki, digabung dari seluruh broker.</p>
-          <p className="mt-1 text-xs text-slate-500">Watchlist dimuat: {marketTime(loadedAt)}</p>
+          <p className="mt-2 text-sm text-slate-500">Watchlist otomatis diambil dari saham yang Anda miliki, digabung dari seluruh broker.</p>
         </div>
         <div className="flex flex-col items-end gap-2">
           <button type="button" onClick={() => setRevision((current) => current + 1)} disabled={loading}
@@ -168,10 +167,10 @@ export default function MarketPage() {
         </div>
       </header>
 
-      <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
+      {/*<p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
         Sumber: Yahoo Finance. Data dapat tertunda, bukan running trade real-time. Cache backend berlaku 5 menit;
         tombol Refresh tidak memaksa Yahoo memberikan harga baru. Movers hanya mencakup watchlist Anda, bukan seluruh BEI.
-      </p>
+      </p>*/}
       {error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}{rows.length > 0 && ' Data sebelumnya masih ditampilkan.'}</p>}
       {warning && <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">{warning}</p>}
 
@@ -231,7 +230,7 @@ export default function MarketPage() {
         {detail && <>
           <p className="mt-1 text-sm text-slate-500">{detail.name || selected} · {selectedRow?.sector ? `${selectedRow.sector} · ` : ''}{detail.exchange || 'Bursa tidak tersedia'} · {detail.currency || 'Mata uang tidak tersedia'}</p>
           <p className="mt-3 text-2xl font-bold">{money(detail.price)} <span className={`text-sm ${detail.change_percent == null ? 'text-slate-500' : plClass(detail.change_percent)}`}>{detail.change_percent == null ? '—' : formatPercent(detail.change_percent)}</span></p>
-          <p className="mt-1 text-xs text-slate-500">Waktu harga Yahoo: {marketTime(detail.market_time)} · Diambil server: {marketTime(detail.fetched_at)}</p>
+          {/*<p className="mt-1 text-xs text-slate-500">Waktu harga Yahoo: {marketTime(detail.market_time)} · Diambil server: {marketTime(detail.fetched_at)}</p>*/}
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {[
               ['Previous Close', money(detail.previous_close)],
@@ -241,7 +240,7 @@ export default function MarketPage() {
             ].map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 text-sm font-semibold">{value}</p></div>)}
           </div>
           <h3 className="mt-5 text-sm font-semibold">Histori harga · 1 bulan</h3>
-          <p className="mt-1 text-xs text-slate-500">Titik harga close harian dari Yahoo; titik terakhir dapat berubah selama sesi perdagangan. Hover titik untuk melihat harga.</p>
+          {/*<p className="mt-1 text-xs text-slate-500">Titik harga close harian dari Yahoo; titik terakhir dapat berubah selama sesi perdagangan. Hover titik untuk melihat harga.</p>*/}
           <MarketChart ticker={detail.ticker} history={detail.history} />
           <a href={`https://finance.yahoo.com/quote/${encodeURIComponent(selected + '.JK')}/`} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block text-xs font-semibold text-teal-700 underline">Lihat emiten di Yahoo Finance ↗</a>
         </>}

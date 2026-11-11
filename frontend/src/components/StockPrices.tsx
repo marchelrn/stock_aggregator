@@ -91,24 +91,24 @@ export default function StockPrices({ prices = {}, onFetch, onClear }: StockPric
             ) : (
               sortedEntries.map((price) => (
                 <tr key={price.ticker}>
-                  <td className="border-b border-slate-100 p-4 text-sm font-semibold">
+                  <td className="border-b border-slate-100 p-4 text-sm text-center font-semibold">
                     {price.ticker}
                   </td>
-                  <td className="border-b border-slate-100 p-2 text-sm">
+                  <td className="border-b border-slate-100 p-2 text-sm text-center">
                     {formatNumber(price.price, 2)}
                   </td>
-                  <td className="border-b border-slate-100 p-2 text-sm">
+                  <td className="border-b border-slate-100 p-2 text-sm text-center">
                     {formatNumber(price.previous_close, 2)}
                   </td>
-                  <td className={`border-b border-slate-100 p-2 text-sm ${plClass(price.change)}`}>
+                  <td className={`border-b border-slate-100 p-2 text-sm text-center ${plClass(price.change)}`}>
                     {formatNumber(price.change, 2)}
                   </td>
                   <td
-                    className={`border-b border-slate-100 p-2 text-sm ${plClass(price.change_percent)}`}
+                    className={`border-b border-slate-100 p-2 text-sm text-center ${plClass(price.change_percent)}`}
                   >
                     {formatPercent(price.change_percent)}
                   </td>
-                  <td className="border-b border-slate-100 p-2 text-sm">{price.currency}</td>
+                  <td className="border-b border-slate-100 p-2 text-sm text-center">{price.currency}</td>
                 </tr>
               ))
             )}
