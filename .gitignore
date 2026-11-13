@@ -1,2 +1,7 @@
 backend-backup
 .idea
+*.cjs
+node_modules
+.env
+.env.local
+*.log
