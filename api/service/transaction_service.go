@@ -21,6 +21,36 @@ type TransactionService struct {
 	Transaction *contract.Repository
 }
 
+// convertTransactionToDTO converts a transaction model to DTO format
+func (s *TransactionService) convertTransactionToDTO(transaction *models.Transaction) dto.TransactionData {
+	return dto.TransactionData{
+		Id: transaction.Id,
+		Broker: dto.BrokerTransaction{
+			BrokerID: transaction.BrokerID,
+			Name:     transaction.BrokerName,
+		},
+		Stock: dto.StockTransaction{
+			Id:     transaction.StockID,
+			Ticker: transaction.Ticker,
+			Lot:    transaction.Lot,
+			Price:  transaction.Price,
+		},
+		Type:       string(transaction.Type),
+		AmountDone: transaction.AmountDone,
+		Tax:        transaction.Tax,
+		Date:       transaction.Date,
+	}
+}
+
+// convertTransactionsToDTO converts multiple transactions (by value) to DTO format
+func (s *TransactionService) convertTransactionsToDTO(transactions []models.Transaction) []dto.TransactionData {
+	transactionData := make([]dto.TransactionData, 0, len(transactions))
+	for i := range transactions {
+		transactionData = append(transactionData, s.convertTransactionToDTO(&transactions[i]))
+	}
+	return transactionData
+}
+
 func (s *TransactionService) GetTransaction(userID uint, id int) (*dto.TransactionResponse, error) {
 	transactions, err := s.Transaction.Transactions.GetTransactions(userID, id)
 	if err != nil {
@@ -30,28 +60,12 @@ func (s *TransactionService) GetTransaction(userID uint, id int) (*dto.Transacti
 		return nil, errs.NotFound("transaction not found")
 	}
 
-	transaction := transactions[0]
+	transaction := &transactions[0]
 
 	response := &dto.TransactionResponse{
 		StatusCode: 200,
 		Message:    "Transaction retrieved successfully",
-		Data: dto.TransactionData{
-			Id: transaction.Id,
-			Broker: dto.BrokerTransaction{
-				BrokerID: transaction.BrokerID,
-				Name:     transaction.BrokerName,
-			},
-			Stock: dto.StockTransaction{
-				Id:     transaction.StockID,
-				Ticker: transaction.Ticker,
-				Lot:    transaction.Lot,
-				Price:  transaction.Price,
-			},
-			Type:       string(transaction.Type),
-			AmountDone: transaction.AmountDone,
-			Tax:        transaction.Tax,
-			Date:       transaction.Date,
-		},
+		Data:       s.convertTransactionToDTO(transaction),
 	}
 
 	return response, nil
@@ -63,26 +77,7 @@ func (s *TransactionService) GetAllTransactions(userID uint) (*dto.AllTransactio
 		return nil, err
 	}
 
-	var transactionData []dto.TransactionData
-	for _, transaction := range transactions {
-		transactionData = append(transactionData, dto.TransactionData{
-			Id: transaction.Id,
-			Broker: dto.BrokerTransaction{
-				BrokerID: transaction.BrokerID,
-				Name:     transaction.BrokerName,
-			},
-			Stock: dto.StockTransaction{
-				Id:     transaction.StockID,
-				Ticker: transaction.Ticker,
-				Lot:    transaction.Lot,
-				Price:  transaction.Price,
-			},
-			Type:       string(transaction.Type),
-			AmountDone: transaction.AmountDone,
-			Tax:        transaction.Tax,
-			Date:       transaction.Date,
-		})
-	}
+	transactionData := s.convertTransactionsToDTO(transactions)
 
 	response := &dto.AllTransactionsResponse{
 		StatusCode: 200,
@@ -196,23 +191,7 @@ func (s *TransactionService) CreateTransaction(userID uint, ticker []string, pay
 	response := &dto.TransactionResponse{
 		StatusCode: http.StatusOK,
 		Message:    "Transaction created successfully",
-		Data: dto.TransactionData{
-			Id: transaction.Id,
-			Broker: dto.BrokerTransaction{
-				BrokerID: transaction.BrokerID,
-				Name:     transaction.BrokerName,
-			},
-			Stock: dto.StockTransaction{
-				Id:     transaction.StockID,
-				Ticker: transaction.Ticker,
-				Lot:    transaction.Lot,
-				Price:  transaction.Price,
-			},
-			Type:       string(transaction.Type),
-			AmountDone: transaction.AmountDone,
-			Tax:        transaction.Tax,
-			Date:       transaction.Date,
-		},
+		Data:       s.convertTransactionToDTO(transaction),
 	}
 
 	return response, nil
