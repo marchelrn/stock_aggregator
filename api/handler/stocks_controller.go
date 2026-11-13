@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,12 +16,39 @@ type StocksController struct {
 }
 
 func (s *StocksController) InitService(svc *contract.Service) {
-	fmt.Println("DEBUG: Initializing StocksController with StocksService")
 	if svc == nil {
-		fmt.Println("ERROR: Provided service is nil")
 		return
 	}
 	s.service = svc.Stocks
+}
+
+// parseTickers extracts and deduplicates tickers from comma-separated string
+func (s *StocksController) parseTickers(tickerParam string) ([]string, error) {
+	if tickerParam == "" {
+		return nil, errs.BadRequest("Stock ticker is required")
+	}
+
+	rawTickers := strings.Split(strings.ToUpper(tickerParam), ",")
+	tickers := make([]string, 0, len(rawTickers))
+	seen := make(map[string]struct{}, len(rawTickers))
+
+	for _, ticker := range rawTickers {
+		ticker = strings.TrimSpace(ticker)
+		if ticker == "" {
+			continue
+		}
+		if _, exists := seen[ticker]; exists {
+			continue
+		}
+		seen[ticker] = struct{}{}
+		tickers = append(tickers, ticker)
+	}
+
+	if len(tickers) == 0 {
+		return nil, errs.BadRequest("Stock ticker is required")
+	}
+
+	return tickers, nil
 }
 
 func (s *StocksController) GetAllStocks(c *gin.Context) {
@@ -59,28 +85,9 @@ func (s *StocksController) GetStocks(c *gin.Context) {
 	}
 
 	stockTickerParam := c.Param("ticker")
-	if stockTickerParam == "" {
-		HandleError(c, errs.BadRequest("Stock ticker is required"))
-		return
-	}
-
-	rawTickers := strings.Split(strings.ToUpper(stockTickerParam), ",")
-	tickers := make([]string, 0, len(rawTickers))
-	seen := make(map[string]struct{}, len(rawTickers))
-	for _, ticker := range rawTickers {
-		ticker = strings.TrimSpace(ticker)
-		if ticker == "" {
-			continue
-		}
-		if _, exists := seen[ticker]; exists {
-			continue
-		}
-		seen[ticker] = struct{}{}
-		tickers = append(tickers, ticker)
-	}
-
-	if len(tickers) == 0 {
-		HandleError(c, errs.BadRequest("Stock ticker is required"))
+	tickers, err := s.parseTickers(stockTickerParam)
+	if err != nil {
+		HandleError(c, err)
 		return
 	}
 
@@ -129,27 +136,9 @@ func (s *StocksController) UpdateStock(c *gin.Context) {
 	}
 
 	stockTickerParam := c.Param("ticker")
-	if stockTickerParam == "" {
-		HandleError(c, errs.BadRequest("Stock ticker is required"))
-		return
-	}
-	rawTickers := strings.Split(strings.ToUpper(stockTickerParam), ",")
-	tickers := make([]string, 0, len(rawTickers))
-	seen := make(map[string]struct{}, len(rawTickers))
-	for _, ticker := range rawTickers {
-		ticker = strings.TrimSpace(ticker)
-		if ticker == "" {
-			continue
-		}
-		if _, exists := seen[ticker]; exists {
-			continue
-		}
-		seen[ticker] = struct{}{}
-		tickers = append(tickers, ticker)
-	}
-
-	if len(tickers) == 0 {
-		HandleError(c, errs.BadRequest("Stock ticker is required"))
+	tickers, err := s.parseTickers(stockTickerParam)
+	if err != nil {
+		HandleError(c, err)
 		return
 	}
 
@@ -179,28 +168,9 @@ func (s *StocksController) DeleteStockData(c *gin.Context) {
 	}
 
 	tickerParam := c.Param("ticker")
-	if tickerParam == "" {
-		HandleError(c, errs.BadRequest("Stock ticker is required"))
-		return
-	}
-
-	rawTickers := strings.Split(strings.ToUpper(tickerParam), ",")
-	tickers := make([]string, 0, len(rawTickers))
-	seen := make(map[string]struct{}, len(rawTickers))
-	for _, ticker := range rawTickers {
-		ticker = strings.TrimSpace(ticker)
-		if ticker == "" {
-			continue
-		}
-		if _, exists := seen[ticker]; exists {
-			continue
-		}
-		seen[ticker] = struct{}{}
-		tickers = append(tickers, ticker)
-	}
-
-	if len(tickers) == 0 {
-		HandleError(c, errs.BadRequest("Stock ticker is required"))
+	tickers, err := s.parseTickers(tickerParam)
+	if err != nil {
+		HandleError(c, err)
 		return
 	}
 
