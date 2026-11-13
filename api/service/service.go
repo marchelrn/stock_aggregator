@@ -24,6 +24,6 @@ func New(repo *contract.Repository) (*contract.Service, error) {
 		Transaction: ImplTransactionService(repo),
 		Yahoo:       yahooSvc,
 		Auth:        ImplAuthService(repo.Auth),
-		Gmail:       ImplGmailService(repo.Auth, dispatcher, repo.Transactions, repo.Brokers),
+		Gmail:       ImplGmailService(repo.Auth, dispatcher, repo.Transactions, repo.CashMutations, repo.Brokers),
 	}, nil
 }
