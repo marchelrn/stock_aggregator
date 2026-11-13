@@ -60,6 +60,52 @@ func ImplGmailService(authRepo contract.AuthRepository, parser TradeConfirmation
 	}
 }
 
+// convertParsedTradeToTransaction converts a parsed trade from email to a transaction model
+func (s *GmailServiceImpl) convertParsedTradeToTransaction(user *models.Users, trade *dto.ParsedTrade) *models.Transaction {
+	var brokerID int
+	if s.BrokerRepo != nil && trade.BrokerName != "" {
+		broker, err := s.BrokerRepo.GetBrokerByName(user.Id, trade.BrokerName)
+		if err == nil && broker != nil {
+			brokerID = broker.ID
+		}
+	}
+
+	amountDone := trade.AmountDone
+	if amountDone == 0 {
+		amountDone = float64(trade.Lot)*100*trade.Price + trade.Tax
+	}
+
+	return &models.Transaction{
+		UserID:     user.Id,
+		Ticker:     trade.Ticker,
+		Price:      trade.Price,
+		Lot:        trade.Lot,
+		BrokerID:   brokerID,
+		BrokerName: trade.BrokerName,
+		Type:       models.Type(trade.Type),
+		Date:       trade.Date,
+		AmountDone: amountDone,
+		Tax:        trade.Tax,
+		RefNo:      trade.RefNo,
+	}
+}
+
+// convertCashMutationToDTO converts a cash mutation model to DTO format
+func (s *GmailServiceImpl) convertCashMutationToDTO(m *models.CashMutation) dto.CashMutationItem {
+	return dto.CashMutationItem{
+		ID:          int(m.ID),
+		UserID:      int(m.UserID),
+		BrokerID:    int(m.BrokerID),
+		BrokerName:  m.BrokerName,
+		Type:        string(m.Type),
+		Amount:      m.Amount,
+		Date:        m.Date.Format("2006-01-02T15:04:05Z07:00"),
+		Description: m.Description,
+		RefNo:       m.RefNo,
+		CreatedAt:   m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+}
+
 // getGmailClient creates a Gmail API client using the user's stored OAuth tokens
 func (s *GmailServiceImpl) getGmailClient(ctx context.Context, user *models.Users) (*gmail.Service, error) {
 	cfg := config.GetConfig()
@@ -200,34 +246,9 @@ func (s *GmailServiceImpl) syncTradeConfirmations(ctx context.Context, gmailSrv 
 	// Save parsed trades to database
 	var syncedCount int
 	if s.TransactionRepo != nil && len(allTrades) > 0 {
-		var txReqs []*models.Transaction
+		txReqs := make([]*models.Transaction, 0, len(allTrades))
 		for _, trade := range allTrades {
-			var brokerID int
-			if s.BrokerRepo != nil && trade.BrokerName != "" {
-				broker, err := s.BrokerRepo.GetBrokerByName(user.Id, trade.BrokerName)
-				if err == nil && broker != nil {
-					brokerID = broker.ID
-				}
-			}
-
-			amountDone := trade.AmountDone
-			if amountDone == 0 {
-				amountDone = float64(trade.Lot)*100*trade.Price + trade.Tax
-			}
-
-			txReqs = append(txReqs, &models.Transaction{
-				UserID:     user.Id,
-				Ticker:     trade.Ticker,
-				Price:      trade.Price,
-				Lot:        trade.Lot,
-				BrokerID:   brokerID,
-				BrokerName: trade.BrokerName,
-				Type:       models.Type(trade.Type),
-				Date:       trade.Date,
-				AmountDone: amountDone,
-				Tax:        trade.Tax,
-				RefNo:      trade.RefNo,
-			})
+			txReqs = append(txReqs, s.convertParsedTradeToTransaction(user, &trade))
 		}
 
 		// Sort trades chronologically (oldest date first) to preserve trading sequence
@@ -300,18 +321,7 @@ func (s *GmailServiceImpl) GetCashMutations(userID uint) (*dto.CashMutationsList
 	}
 	items := make([]dto.CashMutationItem, 0, len(mutations))
 	for _, m := range mutations {
-		items = append(items, dto.CashMutationItem{
-			ID:          int(m.ID),
-			UserID:      int(m.UserID),
-			BrokerID:    int(m.BrokerID),
-			BrokerName:  m.BrokerName,
-			Type:        string(m.Type),
-			Amount:      m.Amount,
-			Date:        m.Date.Format("2006-01-02T15:04:05Z07:00"),
-			Description: m.Description,
-			RefNo:       m.RefNo,
-			CreatedAt:   m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		})
+		items = append(items, s.convertCashMutationToDTO(&m))
 	}
 	return &dto.CashMutationsListResponse{
 		StatusCode: 200,
