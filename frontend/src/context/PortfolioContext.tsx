@@ -11,6 +11,7 @@ import { api, getBaseUrl } from '../lib/api'
 import { buildSummary, normalizeArray } from '../lib/portfolio'
 import type {
   Broker,
+  CashMutationData,
   Holding,
   PortfolioSummary,
   StockPriceMap,
@@ -18,6 +19,9 @@ import type {
   TransactionPayload,
   User,
   UserResponse,
+  GmailSyncResponse,
+  GmailSyncStatusResponse,
+  CashMutationsResponse,
 } from '../types'
 
 interface PortfolioState {
@@ -51,6 +55,10 @@ interface PortfolioContextValue {
     broker_name?: string
   }) => Promise<boolean>
   syncStockSectors: () => Promise<boolean>
+  syncTradeConfirmations: (fullSync?: boolean) => Promise<GmailSyncResponse | null>
+  syncCashMutations: () => Promise<CashMutationsResponse | null>
+  loadCashMutations: () => Promise<CashMutationData[]>
+  getGmailSyncStatus: () => Promise<GmailSyncStatusResponse | null>
 }
 
 const initialState: PortfolioState = {
@@ -338,6 +346,64 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     }
   }, [setStatus, loadDashboard])
 
+  const syncTradeConfirmations = useCallback(
+    async (fullSync = false): Promise<GmailSyncResponse | null> => {
+      try {
+        setStatus(fullSync ? 'Sinkronisasi penuh trade confirmation dari Gmail...' : 'Menyinkronkan trade confirmation dari Gmail...')
+        const path = fullSync ? '/api/gmail/sync?full=true' : '/api/gmail/sync'
+        const res = await api<GmailSyncResponse>(path, { method: 'POST' })
+        const tradesSynced = res.TradesSynced ?? res.trades_synced ?? 0
+        const tradesFound = res.TradesFound ?? res.trades_found ?? 0
+        if (tradesSynced > 0 || tradesFound > 0) {
+          await loadDashboard({ silent: true })
+        }
+        setStatus(res.Message ?? res.message ?? 'Sync completed')
+        return res
+      } catch (error) {
+        setStatus((error as Error).message, true)
+        return null
+      }
+    },
+    [setStatus, loadDashboard],
+  )
+
+  const syncCashMutations = useCallback(async (): Promise<CashMutationsResponse | null> => {
+    try {
+      setStatus('Menyinkronkan mutasi kas (deposit/penarikan) dari Gmail...')
+      const res = await api<CashMutationsResponse>('/api/gmail/sync-cash', { method: 'POST' })
+      const mutationsSynced = res.MutationsSynced ?? 0
+      const mutationsFound = res.MutationsFound ?? 0
+      if (mutationsSynced > 0 || mutationsFound > 0) {
+        await loadDashboard({ silent: true })
+      }
+      setStatus(res.Message ?? 'Sync completed')
+      return res
+    } catch (error) {
+      setStatus((error as Error).message, true)
+      return null
+    }
+  }, [setStatus, loadDashboard])
+
+  const getGmailSyncStatus = useCallback(async (): Promise<GmailSyncStatusResponse | null> => {
+    try {
+      const res = await api<GmailSyncStatusResponse>('/api/gmail/status')
+      return res
+    } catch (error) {
+      setStatus((error as Error).message, true)
+      return null
+    }
+  }, [setStatus])
+
+  const loadCashMutations = useCallback(async (): Promise<CashMutationData[]> => {
+    try {
+      const res = await api<{ data?: CashMutationData[] }>('/api/gmail/cash-mutations')
+      return res.data ?? []
+    } catch (error) {
+      setStatus((error as Error).message, true)
+      return []
+    }
+  }, [setStatus])
+
   const value = useMemo<PortfolioContextValue>(
     () => ({
       state,
@@ -354,6 +420,10 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       clearLiveStockPrices,
       addStock,
       syncStockSectors,
+      syncTradeConfirmations,
+      syncCashMutations,
+      loadCashMutations,
+      getGmailSyncStatus,
     }),
     [
       state,
@@ -370,6 +440,10 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       clearLiveStockPrices,
       addStock,
       syncStockSectors,
+      syncTradeConfirmations,
+      syncCashMutations,
+      loadCashMutations,
+      getGmailSyncStatus,
     ],
   )
 

@@ -118,3 +118,75 @@ export interface TransactionPayload {
   lot: number
   price: number
 }
+
+export interface ParsedTrade {
+  ticker: string
+  lot: number
+  price: number
+  type: string
+  date: string
+  broker_name: string
+  amount_done: number
+  tax: number
+  ref_no?: string
+}
+
+export interface GmailSyncResponse {
+  status_code: number
+  message: string
+  trades_found: number
+  trades_synced: number
+  parsed_trades: ParsedTrade[]
+  TradesFound?: number
+  TradesSynced?: number
+  Message?: string
+}
+
+export interface GmailSyncStatusResponse {
+  status_code: number
+  message: string
+  gmail_sync_enabled: boolean
+  last_sync_at: string | null
+  GmailSyncEnabled?: boolean
+  LastSyncAt?: string | null
+}
+
+export interface CashMutationData {
+  id: number
+  user_id: number
+  broker_id: number
+  broker_name: string
+  type: string
+  amount: number
+  date: string
+  description: string
+  ref_no: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CashMutationsResponse {
+  status_code: number
+  message: string
+  data: CashMutationData[]
+  MutationsFound?: number
+  MutationsSynced?: number
+  Message?: string
+}
+
+export interface ParsedCashMutationItem {
+  broker_name: string
+  type: string
+  amount: number
+  date: string
+  ref_no: string
+  description?: string
+}
+
+export interface GmailCashSyncResponse {
+  status_code: number
+  message: string
+  mutations_found: number
+  mutations_synced: number
+  parsed_mutations: ParsedCashMutationItem[]
+}

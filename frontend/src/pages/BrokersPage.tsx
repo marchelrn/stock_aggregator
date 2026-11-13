@@ -3,11 +3,12 @@ import { usePortfolio } from '../context/PortfolioContext'
 import { formatCurrency } from '../lib/formatters'
 import { api } from '../lib/api'
 import { normalizeArray } from '../lib/portfolio'
-import type { Broker, Holding } from '../types'
+import type { Broker, Holding, CashMutationData } from '../types'
 import BrokerTable from '../components/BrokerTable'
 import HoldingTable from '../components/HoldingTable'
 import TransactionHistory from '../components/TransactionHistory'
 import StockPrices from '../components/StockPrices'
+import CashMutationHistory from '../components/CashMutationHistory'
 
 interface TradeModalState {
   open: boolean
@@ -33,7 +34,13 @@ export default function BrokersPage() {
     fetchStockPrices,
     clearLiveStockPrices,
     setStatus,
+    syncTradeConfirmations,
+    syncCashMutations,
+    loadCashMutations,
+    getGmailSyncStatus,
   } = usePortfolio()
+
+  const [cashMutations, setCashMutations] = useState<CashMutationData[]>([])
 
   // Broker yang holding-nya ditampilkan. Boleh lebih dari satu (atau kosong).
   const [selectedBrokerIds, setSelectedBrokerIds] = useState<number[]>([])
@@ -48,6 +55,12 @@ export default function BrokersPage() {
   const [configBrokerName, setConfigBrokerName] = useState('')
   const [configCash, setConfigCash] = useState<number | ''>('')
   const [configPin, setConfigPin] = useState('')
+
+  // Gmail sync state
+  const [gmailSyncEnabled, setGmailSyncEnabled] = useState(false)
+  const [lastGmailSync, setLastGmailSync] = useState<string | null>(null)
+  const [syncingTrades, setSyncingTrades] = useState(false)
+  const [syncingCash, setSyncingCash] = useState(false)
 
   // State untuk penambahan saham pada broker
   const [pendingStocks, setPendingStocks] = useState<PendingStock[]>([])
@@ -68,6 +81,11 @@ export default function BrokersPage() {
     loadDashboard()
   }, [loadDashboard])
 
+  // Load cash mutations on mount
+  useEffect(() => {
+    loadCashMutations().then(setCashMutations)
+  }, [loadCashMutations])
+
   // Sinkronkan pilihan dengan daftar broker:
   // - broker baru otomatis dicentang (semua tampil secara default)
   // - broker yang sudah dihapus dibuang dari pilihan
@@ -83,6 +101,38 @@ export default function BrokersPage() {
       return unchanged ? prev : next
     })
   }, [state.brokers])
+
+  // Fetch Gmail sync status on load
+  useEffect(() => {
+    getGmailSyncStatus().then((res) => {
+      if (res) {
+        setGmailSyncEnabled(res.GmailSyncEnabled ?? res.gmail_sync_enabled ?? false)
+        setLastGmailSync(res.LastSyncAt ?? res.last_sync_at ?? null)
+      }
+    })
+  }, [getGmailSyncStatus])
+
+  const handleSyncTradeConfirmations = async (fullSync = false) => {
+    setSyncingTrades(true)
+    const res = await syncTradeConfirmations(fullSync)
+    if (res) {
+      setGmailSyncEnabled(true)
+      setLastGmailSync(new Date().toISOString())
+    }
+    setSyncingTrades(false)
+  }
+
+  const handleSyncCashMutations = async () => {
+    setSyncingCash(true)
+    const res = await syncCashMutations()
+    if (res) {
+      setGmailSyncEnabled(true)
+      setLastGmailSync(new Date().toISOString())
+      // Refresh cash mutation list after sync
+      loadCashMutations().then(setCashMutations)
+    }
+    setSyncingCash(false)
+  }
 
   const handleToggleBroker = (id: number) => {
     setSelectedBrokerIds((current) =>
@@ -275,6 +325,44 @@ export default function BrokersPage() {
           />
         </section>
 
+        {/* Gmail Sync Section */}
+        <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-xl font-semibold">Gmail Sync</h2>
+            <span className={`text-xs font-medium px-2 py-0.5 rounded ${gmailSyncEnabled ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'}`}>
+              {gmailSyncEnabled ? 'Terhubung' : 'Belum Terhubung'}
+            </span>
+          </div>
+          {lastGmailSync && (
+            <p className="mt-1 text-sm text-slate-500">
+              Terakhir sync: {new Date(lastGmailSync).toLocaleString('id-ID')}
+            </p>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
+              onClick={() => handleSyncTradeConfirmations(false)}
+              disabled={syncingTrades}
+            >
+              {syncingTrades ? 'Menyinkronkan...' : 'Sync Trade Confirmation'}
+            </button>
+            <button
+              className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50"
+              onClick={() => handleSyncTradeConfirmations(true)}
+              disabled={syncingTrades}
+            >
+              Full Sync (Semua Riwayat)
+            </button>
+            <button
+              className="rounded-lg bg-amber-700 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
+              onClick={handleSyncCashMutations}
+              disabled={syncingCash}
+            >
+              {syncingCash ? 'Menyinkronkan...' : 'Sync Deposit & Penarikan'}
+            </button>
+          </div>
+        </section>
+
         <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-xl font-semibold">Holdings by Broker Selected</h2>
@@ -297,6 +385,14 @@ export default function BrokersPage() {
             <h2 className="text-xl font-semibold">History</h2>
           </div>
           <TransactionHistory transactionHistory={state.transactionHistory} />
+        </section>
+
+        <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-xl font-semibold">Riwayat Deposit & Penarikan</h2>
+            <span className="text-xs text-slate-500">{cashMutations.length} transaksi</span>
+          </div>
+          <CashMutationHistory cashMutations={cashMutations} />
         </section>
 
         <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
@@ -510,7 +606,7 @@ export default function BrokersPage() {
                     </optgroup>
                   )}
                   <optgroup label="Tambah Sekuritas Baru">
-                    {['Stockbit Sekuritas', 'Mandiri Sekuritas', 'BNI Sekuritas']
+                    {['Stockbit Sekuritas', 'Trimegah Sekuritas', 'Mandiri Sekuritas', 'BNI Sekuritas']
                       .filter((name) => !state.brokers.some((b) => b.name.toLowerCase() === name.toLowerCase()))
                       .map((name) => (
                         <option key={name} value={name}>
