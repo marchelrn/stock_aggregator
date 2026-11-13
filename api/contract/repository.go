@@ -7,12 +7,13 @@ import (
 )
 
 type Repository struct {
-	Stocks       StocksRepository
-	Brokers      BrokerRepository
-	Transactions TransactionRepository
-	Yahoo        YahooRepository
-	Auth         AuthRepository
-	PDFTemplates PDFTemplateRepository
+	Stocks           StocksRepository
+	Brokers          BrokerRepository
+	Transactions     TransactionRepository
+	CashMutations    CashMutationRepository
+	Yahoo            YahooRepository
+	Auth             AuthRepository
+	PDFTemplates     PDFTemplateRepository
 }
 
 type PDFTemplateRepository interface {
@@ -59,6 +60,11 @@ type TransactionRepository interface {
 	SyncTradeConfirmationBatch(userID uint, trades []*models.Transaction) (int, error)
 	CountTransactionsByTicker(userID uint, ticker string) (int64, error)
 	DeleteTransaction(userID uint, id int) error
+}
+
+type CashMutationRepository interface {
+	GetAll(userID uint) ([]models.CashMutation, error)
+	SyncCashMutationBatch(userID uint, mutations []*models.CashMutation) (int, error)
 }
 
 type YahooRepository interface {

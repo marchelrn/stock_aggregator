@@ -208,3 +208,39 @@ type GmailSyncStatusResponse struct {
 	GmailSyncEnabled bool       `json:"gmail_sync_enabled"`
 	LastSyncAt       *time.Time `json:"last_sync_at"`
 }
+
+type ParsedCashMutation struct {
+	BrokerName  string  `json:"broker_name"`
+	Type        string  `json:"type"` // DEPOSIT or WITHDRAW
+	Amount      float64 `json:"amount"`
+	Date        string  `json:"date"`
+	RefNo       string  `json:"ref_no,omitempty"`
+	Description string  `json:"description,omitempty"`
+}
+
+type GmailCashSyncResponse struct {
+	StatusCode       int                 `json:"status_code"`
+	Message          string              `json:"message"`
+	MutationsFound   int                 `json:"mutations_found"`
+	MutationsSynced  int                 `json:"mutations_synced"`
+	ParsedMutations  []ParsedCashMutation `json:"parsed_mutations"`
+}
+
+type CashMutationItem struct {
+	ID          int     `json:"id"`
+	UserID      int     `json:"user_id"`
+	BrokerID    int     `json:"broker_id"`
+	BrokerName  string  `json:"broker_name"`
+	Type        string  `json:"type"`
+	Amount      float64 `json:"amount"`
+	Date        string  `json:"date"`
+	Description string  `json:"description"`
+	RefNo       string  `json:"ref_no"`
+	CreatedAt   string  `json:"created_at"`
+}
+
+type CashMutationsListResponse struct {
+	StatusCode int                `json:"status_code"`
+	Message    string             `json:"message"`
+	Data       []CashMutationItem `json:"data"`
+}

@@ -39,6 +39,17 @@ func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.
 			return err
 		}
 
+		// First check by RefNo (unique per trade confirmation)
+		if payload.RefNo != "" {
+			var existingByRef models.Transaction
+			err := tx.Where("user_id = ? AND ref_no = ?", payload.UserID, payload.RefNo).First(&existingByRef).Error
+			if err == nil {
+				return nil // Already processed this trade confirmation
+			} else if err != gorm.ErrRecordNotFound {
+				return err
+			}
+		}
+
 		var existing models.Transaction
 		err := tx.Where("user_id = ? AND ticker = ? AND type = ? AND lot = ? AND price = ? AND DATE(date) = DATE(?) AND broker_id = ?",
 			payload.UserID, payload.Ticker, payload.Type, payload.Lot, payload.Price, payload.Date, payload.BrokerID).
@@ -314,6 +325,17 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 				var tickerBuyCost, tickerSellProceeds float64
 
 				for _, trade := range tradesForTicker {
+					// First check by RefNo (unique per trade confirmation)
+					if trade.RefNo != "" {
+						var existingByRef models.Transaction
+						err := tx.Where("user_id = ? AND ref_no = ?", trade.UserID, trade.RefNo).First(&existingByRef).Error
+						if err == nil {
+							continue // Already processed this trade confirmation
+						} else if err != gorm.ErrRecordNotFound {
+							return err
+						}
+					}
+
 					var existing models.Transaction
 					err := tx.Where("user_id = ? AND ticker = ? AND type = ? AND lot = ? AND price = ? AND DATE(date) = DATE(?) AND broker_id = ?",
 						trade.UserID, trade.Ticker, trade.Type, trade.Lot, trade.Price, trade.Date, trade.BrokerID).First(&existing).Error

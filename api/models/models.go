@@ -45,6 +45,29 @@ type StockPrice struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+// Cash Mutation (Deposit / Withdrawal)
+
+type CashMutationType string
+
+const (
+	CashMutationDeposit  CashMutationType = "DEPOSIT"
+	CashMutationWithdraw CashMutationType = "WITHDRAW"
+)
+
+type CashMutation struct {
+	ID          int              `json:"id" gorm:"column:id;primaryKey"`
+	UserID      uint             `json:"user_id" gorm:"column:user_id;index"`
+	BrokerID    int              `json:"broker_id" gorm:"column:broker_id;index"`
+	BrokerName  string           `json:"broker_name" gorm:"column:broker_name"`
+	Type        CashMutationType `json:"type" gorm:"column:type"`
+	Amount      float64          `json:"amount" gorm:"column:amount"`
+	Date        time.Time        `json:"date" gorm:"column:date"`
+	Description string           `json:"description" gorm:"column:description"`
+	RefNo       string           `json:"ref_no" gorm:"column:ref_no"`
+	CreatedAt   time.Time        `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt   time.Time        `json:"updated_at" gorm:"column:updated_at"`
+}
+
 // Transactions
 
 type Transaction struct {
@@ -60,7 +83,7 @@ type Transaction struct {
 	Date       time.Time `json:"date"`
 	AmountDone float64   `json:"amount_done"`
 	Tax        float64   `json:"tax"`
-	RefNo      string    `json:"ref_no,omitempty" gorm:"-"`
+	RefNo      string    `json:"ref_no,omitempty" gorm:"column:ref_no"`
 }
 
 type Type string
@@ -113,4 +136,8 @@ func (Broker) TableName() string {
 
 func (StockPrice) TableName() string {
 	return "stock_prices"
+}
+
+func (CashMutation) TableName() string {
+	return "cash_mutations"
 }

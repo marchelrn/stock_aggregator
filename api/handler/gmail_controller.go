@@ -62,3 +62,49 @@ func (c *GmailController) GetSyncStatus(ctx *gin.Context) {
 
 	ctx.JSON(http.StatusOK, response)
 }
+
+// SyncCashMutations triggers a manual sync of cash deposit/withdrawal emails from Gmail
+func (c *GmailController) SyncCashMutations(ctx *gin.Context) {
+	userID, exists := ctx.Get("user_id")
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	uid, ok := userID.(float64)
+	if !ok {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	response, err := c.service.Gmail.SyncCashMutations(uint(uid))
+	if err != nil {
+		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, response)
+}
+
+// GetCashMutations returns all stored cash mutations for the authenticated user
+func (c *GmailController) GetCashMutations(ctx *gin.Context) {
+	userID, exists := ctx.Get("user_id")
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	uid, ok := userID.(float64)
+	if !ok {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	response, err := c.service.Gmail.GetCashMutations(uint(uid))
+	if err != nil {
+		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, response)
+}

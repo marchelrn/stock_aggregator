@@ -8,11 +8,12 @@ import (
 
 func New(db *gorm.DB) *contract.Repository {
 	return &contract.Repository{
-		Stocks:       ImplStocksRepository(db),
-		Brokers:      ImplBrokersRepository(db),
-		Transactions: ImplTransactionRepository(db),
-		Yahoo:        ImplYahooRepository(db),
-		Auth:         ImplAuthRepository(db),
-		PDFTemplates: ImplPDFTemplateRepository(db),
+		Stocks:        ImplStocksRepository(db),
+		Brokers:       ImplBrokersRepository(db),
+		Transactions:  ImplTransactionRepository(db),
+		CashMutations: ImplCashMutationRepository(db),
+		Yahoo:         ImplYahooRepository(db),
+		Auth:          ImplAuthRepository(db),
+		PDFTemplates:  ImplPDFTemplateRepository(db),
 	}
 }

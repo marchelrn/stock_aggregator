@@ -25,10 +25,11 @@ import (
 )
 
 type GmailServiceImpl struct {
-	AuthRepository  contract.AuthRepository
-	TradeParser     TradeConfirmationParser
-	TransactionRepo contract.TransactionRepository
-	BrokerRepo      contract.BrokerRepository
+	AuthRepository     contract.AuthRepository
+	TradeParser        TradeConfirmationParser
+	TransactionRepo    contract.TransactionRepository
+	CashMutationRepo   contract.CashMutationRepository
+	BrokerRepo         contract.BrokerRepository
 }
 
 // TradeConfirmationParser is the interface for parsing trade confirmation PDFs
@@ -49,12 +50,13 @@ type emailSelectorProvider interface {
 
 const gmailSyncTimeout = 5 * time.Minute
 
-func ImplGmailService(authRepo contract.AuthRepository, parser TradeConfirmationParser, txRepo contract.TransactionRepository, brokerRepo contract.BrokerRepository) contract.GmailService {
+func ImplGmailService(authRepo contract.AuthRepository, parser TradeConfirmationParser, txRepo contract.TransactionRepository, cashRepo contract.CashMutationRepository, brokerRepo contract.BrokerRepository) contract.GmailService {
 	return &GmailServiceImpl{
-		AuthRepository:  authRepo,
-		TradeParser:     parser,
-		TransactionRepo: txRepo,
-		BrokerRepo:      brokerRepo,
+		AuthRepository:     authRepo,
+		TradeParser:        parser,
+		TransactionRepo:    txRepo,
+		CashMutationRepo:   cashRepo,
+		BrokerRepo:         brokerRepo,
 	}
 }
 
@@ -276,6 +278,303 @@ func (s *GmailServiceImpl) GetSyncStatus(userID uint) (*dto.GmailSyncStatusRespo
 		GmailSyncEnabled: user.GmailSyncEnabled,
 		LastSyncAt:       user.LastGmailSyncAt,
 	}, nil
+}
+
+// SyncCashMutations syncs cash deposit/withdrawal emails from Gmail
+func (s *GmailServiceImpl) SyncCashMutations(userID uint) (*dto.GmailCashSyncResponse, error) {
+	return s.SyncCashMutationsContext(context.Background(), userID)
+}
+
+// GetCashMutations returns all stored cash mutations for a user
+func (s *GmailServiceImpl) GetCashMutations(userID uint) (*dto.CashMutationsListResponse, error) {
+	if s.CashMutationRepo == nil {
+		return &dto.CashMutationsListResponse{
+			StatusCode: 200,
+			Message:    "No cash mutation repository available",
+			Data:       []dto.CashMutationItem{},
+		}, nil
+	}
+	mutations, err := s.CashMutationRepo.GetAll(userID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]dto.CashMutationItem, 0, len(mutations))
+	for _, m := range mutations {
+		items = append(items, dto.CashMutationItem{
+			ID:          int(m.ID),
+			UserID:      int(m.UserID),
+			BrokerID:    int(m.BrokerID),
+			BrokerName:  m.BrokerName,
+			Type:        string(m.Type),
+			Amount:      m.Amount,
+			Date:        m.Date.Format("2006-01-02T15:04:05Z07:00"),
+			Description: m.Description,
+			RefNo:       m.RefNo,
+			CreatedAt:   m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		})
+	}
+	return &dto.CashMutationsListResponse{
+		StatusCode: 200,
+		Message:    "success",
+		Data:       items,
+	}, nil
+}
+
+// SyncCashMutationsContext allows callers to cancel Gmail and token refresh requests.
+func (s *GmailServiceImpl) SyncCashMutationsContext(ctx context.Context, userID uint) (*dto.GmailCashSyncResponse, error) {
+	startedAt := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, gmailSyncTimeout)
+	defer cancel()
+
+	// Find user
+	user, err := s.AuthRepository.FindByID(userID)
+	if err != nil {
+		return nil, errs.NotFound("User tidak ditemukan")
+	}
+
+	if !user.GmailSyncEnabled {
+		return nil, errs.BadRequest("Gmail sync belum diaktifkan. Silakan login ulang via Google.")
+	}
+
+	// Create Gmail client
+	gmailSrv, err := s.getGmailClient(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.syncCashMutations(ctx, gmailSrv, user, startedAt)
+}
+
+func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmail.Service, user *models.Users, startedAt time.Time) (*dto.GmailCashSyncResponse, error) {
+	syncDate := user.LastGmailSyncAt
+	if syncDate == nil && !user.CreatedAt.IsZero() {
+		syncDate = &user.CreatedAt
+	}
+	query, err := s.cashMutationQuery(ctx, syncDate)
+	if err != nil {
+		return nil, err
+	}
+	var allMutations []dto.ParsedCashMutation
+	var emailCount int
+	pageToken := ""
+	for {
+		messages, err := gmailSrv.Users.Messages.List("me").Q(query).MaxResults(50).PageToken(pageToken).Context(ctx).Do()
+		if err != nil {
+			return nil, fmt.Errorf("search Gmail messages: %w", err)
+		}
+		for _, msg := range messages.Messages {
+			if msg == nil || msg.Id == "" {
+				return nil, fmt.Errorf("Gmail search returned a message without an ID")
+			}
+			fullMsg, err := gmailSrv.Users.Messages.Get("me", msg.Id).Format("full").Context(ctx).Do()
+			if err != nil {
+				return nil, fmt.Errorf("get Gmail message %s: %w", msg.Id, err)
+			}
+			mutations, err := s.processCashMessage(ctx, gmailSrv, fullMsg)
+			if err != nil {
+				return nil, fmt.Errorf("process Gmail message %s: %w", msg.Id, err)
+			}
+			allMutations = append(allMutations, mutations...)
+			emailCount++
+		}
+		pageToken = messages.NextPageToken
+		if pageToken == "" {
+			break
+		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// Save parsed mutations to database
+	var syncedCount int
+	if s.CashMutationRepo != nil && len(allMutations) > 0 {
+		var mutationReqs []*models.CashMutation
+		for _, mutation := range allMutations {
+			var brokerID int
+			if s.BrokerRepo != nil && mutation.BrokerName != "" {
+				broker, err := s.BrokerRepo.GetBrokerByName(user.Id, mutation.BrokerName)
+				if err == nil && broker != nil {
+					brokerID = broker.ID
+				}
+			}
+
+			date, _ := time.Parse("2006-01-02", mutation.Date)
+			if date.IsZero() {
+				date = time.Now()
+			}
+
+			mutationReqs = append(mutationReqs, &models.CashMutation{
+				UserID:      user.Id,
+				BrokerID:    brokerID,
+				BrokerName:  mutation.BrokerName,
+				Type:        models.CashMutationType(mutation.Type),
+				Amount:      mutation.Amount,
+				Date:        date,
+				Description: mutation.Description,
+				RefNo:       mutation.RefNo,
+			})
+		}
+
+		synced, err := s.CashMutationRepo.SyncCashMutationBatch(user.Id, mutationReqs)
+		if err != nil {
+			log.Printf("Failed to sync cash mutation batch: %v", err)
+		}
+		syncedCount = synced
+	}
+
+	// Update sync checkpoint
+	updated := *user
+	updated.LastGmailSyncAt = &startedAt
+	if _, err := s.AuthRepository.UpdateUser(&updated); err != nil {
+		return nil, fmt.Errorf("save Gmail sync checkpoint: %w", err)
+	}
+	*user = updated
+
+	message := fmt.Sprintf("Berhasil parse %d mutasi kas dari %d email, disimpan %d mutasi", len(allMutations), emailCount, syncedCount)
+	if s.TransactionRepo == nil {
+		message = fmt.Sprintf("Berhasil parse %d mutasi kas dari %d email; belum disimpan", len(allMutations), emailCount)
+	} else if emailCount == 0 {
+		message = "Tidak ada email mutasi kas baru ditemukan"
+	}
+	return &dto.GmailCashSyncResponse{
+		StatusCode:      http.StatusOK,
+		Message:         message,
+		MutationsFound:  len(allMutations),
+		MutationsSynced: syncedCount,
+		ParsedMutations: allMutations,
+	}, nil
+}
+
+// buildCashMutationQuery builds a Gmail search query for cash mutation emails
+func buildCashMutationQuery(lastSyncAt *time.Time) string {
+	parts := []string{
+		`subject:("deposit" OR "penarikan" OR "withdrawal" OR "top up" OR "mutasi kas")`,
+		"has:attachment",
+		"filename:pdf",
+	}
+
+	if lastSyncAt != nil {
+		safeDate := lastSyncAt.AddDate(0, 0, -1)
+		parts = append(parts, fmt.Sprintf("after:%s", safeDate.Format("2006/01/02")))
+	}
+
+	return strings.Join(parts, " ")
+}
+
+func (s *GmailServiceImpl) cashMutationQuery(ctx context.Context, lastSyncAt *time.Time) (string, error) {
+	query := buildCashMutationQuery(lastSyncAt)
+	provider, ok := s.TradeParser.(emailSelectorProvider)
+	if !ok {
+		return query, nil
+	}
+	selectors, err := provider.EmailSelectors(ctx)
+	if err != nil {
+		return "", fmt.Errorf("load Gmail email selectors: %w", err)
+	}
+	if len(selectors) == 0 {
+		return "", fmt.Errorf("no active PDF email selectors")
+	}
+
+	var senders []string
+	seen := make(map[string]bool)
+	for _, selector := range selectors {
+		if selector.From == "" {
+			continue
+		}
+		address, err := mail.ParseAddress(selector.From)
+		if err != nil || address.Address != selector.From || strings.ContainsAny(selector.From, "\r\n\"\\") {
+			return "", fmt.Errorf("invalid Gmail selector sender %q", selector.From)
+		}
+		key := strings.ToLower(selector.From)
+		if !seen[key] {
+			senders = append(senders, fmt.Sprintf("from:\"%s\"", selector.From))
+			seen[key] = true
+		}
+	}
+	if len(senders) > 0 {
+		query += " {" + strings.Join(senders, " ") + "}"
+	}
+	return query, nil
+}
+
+// processCashMessage processes a Gmail message for cash mutation emails (text/HTML body, not PDF)
+func (s *GmailServiceImpl) processCashMessage(ctx context.Context, gmailSrv *gmail.Service, msg *gmail.Message) ([]dto.ParsedCashMutation, error) {
+	if msg == nil || msg.Payload == nil {
+		return nil, fmt.Errorf("Gmail message has no MIME payload")
+	}
+	emailDate := extractMessageDate(msg)
+	meta := parser.EmailMetadata{}
+	for _, header := range msg.Payload.Headers {
+		if header == nil {
+			continue
+		}
+		switch {
+		case strings.EqualFold(header.Name, "From"):
+			meta.From = header.Value
+		case strings.EqualFold(header.Name, "Subject"):
+			meta.Subject = header.Value
+		}
+	}
+
+	var mutations []dto.ParsedCashMutation
+	var visit func(*gmail.MessagePart) error
+	visit = func(part *gmail.MessagePart) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if part == nil {
+			return nil
+		}
+		// Process text/plain and text/html parts for cash mutations
+		if strings.EqualFold(part.MimeType, "text/plain") || strings.EqualFold(part.MimeType, "text/html") {
+			data := part.Body.Data
+			if data == "" && part.Body.AttachmentId != "" {
+				attachment, err := gmailSrv.Users.Messages.Attachments.Get("me", msg.Id, part.Body.AttachmentId).Context(ctx).Do()
+				if err != nil {
+					return fmt.Errorf("download part %q: %w", part.Filename, err)
+				}
+				data = attachment.Data
+			}
+			if data == "" {
+				return nil
+			}
+			bodyBytes, err := base64.URLEncoding.DecodeString(data)
+			if err != nil {
+				bodyBytes, err = base64.RawURLEncoding.DecodeString(data)
+			}
+			if err != nil {
+				return fmt.Errorf("decode part %q: %w", part.Filename, err)
+			}
+			body := string(bodyBytes)
+			parsed, err := parser.ParseCashEmail(meta.From, meta.Subject, emailDate, body)
+			if err != nil {
+				return fmt.Errorf("parse cash email: %w", err)
+			}
+			if parsed != nil {
+				mutations = append(mutations, dto.ParsedCashMutation{
+					BrokerName:  parsed.BrokerName,
+					Type:        string(parsed.Type),
+					Amount:      parsed.Amount,
+					Date:        parsed.Date.Format("2006-01-02"),
+					RefNo:       parsed.RefNo,
+					Description: parsed.Description,
+				})
+			}
+		}
+		for _, child := range part.Parts {
+			if err := visit(child); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if err := visit(msg.Payload); err != nil {
+		return nil, err
+	}
+	return mutations, nil
 }
 
 // buildTradeConfirmationQuery discovers candidate messages; template selectors
