@@ -321,8 +321,6 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 				}
 
 				var newTrades []*models.Transaction
-				var tickerBuyLot, tickerSellLot int
-				var tickerBuyCost, tickerSellProceeds float64
 
 				for _, trade := range tradesForTicker {
 					// First check by RefNo (unique per trade confirmation)
@@ -349,28 +347,6 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 						return err
 					}
 
-					gross := float64(trade.Lot) * 100 * trade.Price
-					tax := trade.Tax
-					if tax == 0 {
-						switch trade.Type {
-						case models.TypeBuy:
-							tax = gross * 0.0015
-						case models.TypeSell:
-							tax = gross * 0.0025
-						}
-						trade.Tax = tax
-					}
-					if trade.AmountDone == 0 {
-						trade.AmountDone = gross + tax
-					}
-
-					if trade.Type == models.TypeBuy {
-						tickerBuyLot += trade.Lot
-						tickerBuyCost += gross + tax
-					} else if trade.Type == models.TypeSell {
-						tickerSellLot += trade.Lot
-						tickerSellProceeds += (gross - tax)
-					}
 					newTrades = append(newTrades, trade)
 				}
 
