@@ -23,36 +23,8 @@ func ImplStocksService(stocksRepo contract.StocksRepository, brokerRepo contract
 	return &StocksService{StocksRepository: stocksRepo, BrokerRepository: brokerRepo, TransactionRepository: txRepo, YahooService: yahooSvc}
 }
 
-func (s *StocksService) GetAllStocks(userID uint, limiter int) (*dto.StocksResponse, error) {
-	param := limiter
-
-	stocks, err := s.StocksRepository.GetAllStocks(userID, param)
-	if err != nil {
-		return nil, errs.InternalServerError("Failed to retrieve stock data")
-	}
-
-	if s.YahooService != nil {
-		missingTickers := make([]string, 0)
-		for _, stock := range stocks {
-			if stock.Sector == "" && stock.Ticker != "" {
-				missingTickers = append(missingTickers, stock.Ticker)
-			}
-		}
-		if len(missingTickers) > 0 {
-			sectors, _ := s.YahooService.GetSectors(missingTickers)
-			if len(sectors) > 0 {
-				for i := range stocks {
-					if stocks[i].Sector == "" {
-						if sec, ok := sectors[stocks[i].Ticker]; ok && sec != "" {
-							stocks[i].Sector = sec
-							_ = s.StocksRepository.UpdateSectorByTicker(stocks[i].Ticker, sec)
-						}
-					}
-				}
-			}
-		}
-	}
-
+// convertStocksToDTO converts model stocks to DTO format
+func (s *StocksService) convertStocksToDTO(stocks []models.StockHolding) []dto.StocksData {
 	stocksData := make([]dto.StocksData, 0, len(stocks))
 	for _, stock := range stocks {
 		stocksData = append(stocksData, dto.StocksData{
@@ -67,6 +39,50 @@ func (s *StocksService) GetAllStocks(userID uint, limiter int) (*dto.StocksRespo
 			UpdatedAt:  stock.UpdatedAt,
 		})
 	}
+	return stocksData
+}
+
+// syncMissingSectors fetches and updates missing sector information from Yahoo service
+func (s *StocksService) syncMissingSectors(stocks []models.StockHolding) {
+	if s.YahooService == nil || len(stocks) == 0 {
+		return
+	}
+
+	missingTickers := make([]string, 0)
+	for _, stock := range stocks {
+		if stock.Sector == "" && stock.Ticker != "" {
+			missingTickers = append(missingTickers, stock.Ticker)
+		}
+	}
+
+	if len(missingTickers) == 0 {
+		return
+	}
+
+	sectors, err := s.YahooService.GetSectors(missingTickers)
+	if err != nil || len(sectors) == 0 {
+		return
+	}
+
+	for i := range stocks {
+		if stocks[i].Sector == "" {
+			if sec, ok := sectors[stocks[i].Ticker]; ok && sec != "" {
+				stocks[i].Sector = sec
+				_ = s.StocksRepository.UpdateSectorByTicker(stocks[i].Ticker, sec)
+			}
+		}
+	}
+}
+
+func (s *StocksService) GetAllStocks(userID uint, limiter int) (*dto.StocksResponse, error) {
+	stocks, err := s.StocksRepository.GetAllStocks(userID, limiter)
+	if err != nil {
+		return nil, errs.InternalServerError("Failed to retrieve stock data")
+	}
+
+	s.syncMissingSectors(stocks)
+
+	stocksData := s.convertStocksToDTO(stocks)
 
 	response := &dto.StocksResponse{
 		StatusCode: http.StatusOK,
@@ -89,42 +105,9 @@ func (s *StocksService) GetStocks(userID uint, stockTicker []string) (*dto.Stock
 		return nil, errs.NotFound("Stock not found")
 	}
 
-	if s.YahooService != nil {
-		missingTickers := make([]string, 0)
-		for _, stock := range stocks {
-			if stock.Sector == "" && stock.Ticker != "" {
-				missingTickers = append(missingTickers, stock.Ticker)
-			}
-		}
-		if len(missingTickers) > 0 {
-			sectors, _ := s.YahooService.GetSectors(missingTickers)
-			if len(sectors) > 0 {
-				for i := range stocks {
-					if stocks[i].Sector == "" {
-						if sec, ok := sectors[stocks[i].Ticker]; ok && sec != "" {
-							stocks[i].Sector = sec
-							_ = s.StocksRepository.UpdateSectorByTicker(stocks[i].Ticker, sec)
-						}
-					}
-				}
-			}
-		}
-	}
+	s.syncMissingSectors(stocks)
 
-	stocksData := make([]dto.StocksData, 0, len(stocks))
-	for _, stock := range stocks {
-		stocksData = append(stocksData, dto.StocksData{
-			Id:         stock.Id,
-			Ticker:     stock.Ticker,
-			Sector:     stock.Sector,
-			Lot:        stock.Lot,
-			AvgPrice:   stock.AvgPrice,
-			BrokerID:   stock.BrokerID,
-			BrokerName: stock.BrokerName,
-			CreatedAt:  stock.CreatedAt,
-			UpdatedAt:  stock.UpdatedAt,
-		})
-	}
+	stocksData := s.convertStocksToDTO(stocks)
 
 	response := &dto.StocksResponse{
 		StatusCode: http.StatusOK,
@@ -328,39 +311,9 @@ func (s *StocksService) SyncStockSectors(userID uint) (*dto.StocksResponse, erro
 		return nil, errs.InternalServerError("Failed to retrieve stock data")
 	}
 
-	tickers := make([]string, 0, len(stocks))
-	for _, st := range stocks {
-		if st.Ticker != "" {
-			tickers = append(tickers, st.Ticker)
-		}
-	}
+	s.syncMissingSectors(stocks)
 
-	if len(tickers) > 0 && s.YahooService != nil {
-		sectors, err := s.YahooService.GetSectors(tickers)
-		if err == nil && len(sectors) > 0 {
-			for i := range stocks {
-				if sec, ok := sectors[stocks[i].Ticker]; ok && sec != "" {
-					stocks[i].Sector = sec
-					_ = s.StocksRepository.UpdateSectorByTicker(stocks[i].Ticker, sec)
-				}
-			}
-		}
-	}
-
-	stocksData := make([]dto.StocksData, 0, len(stocks))
-	for _, stock := range stocks {
-		stocksData = append(stocksData, dto.StocksData{
-			Id:         stock.Id,
-			Ticker:     stock.Ticker,
-			Sector:     stock.Sector,
-			Lot:        stock.Lot,
-			AvgPrice:   stock.AvgPrice,
-			BrokerID:   stock.BrokerID,
-			BrokerName: stock.BrokerName,
-			CreatedAt:  stock.CreatedAt,
-			UpdatedAt:  stock.UpdatedAt,
-		})
-	}
+	stocksData := s.convertStocksToDTO(stocks)
 
 	return &dto.StocksResponse{
 		StatusCode: http.StatusOK,
