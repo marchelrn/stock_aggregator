@@ -25,6 +25,8 @@ func getMigrations() []migration {
 		getCreatePDFParsingTemplates(),
 		getAlterTablesAddUserID(),
 		getAlterStocksAddSector(),
+		getAddRefNoToTransactions(),
+		getCreateTableCashMutations(),
 	}
 }
 
