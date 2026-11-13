@@ -20,6 +20,30 @@ func ImplBrokersService(repo contract.BrokerRepository) contract.BrokersService 
 	return &BrokersService{BrokersRepository: repo}
 }
 
+// convertStockToDTO converts a single stock model to DTO format
+func (s *BrokersService) convertStockToDTO(stock models.StockHolding) dto.StocksData {
+	return dto.StocksData{
+		Id:         stock.Id,
+		Ticker:     stock.Ticker,
+		Sector:     stock.Sector,
+		Lot:        stock.Lot,
+		AvgPrice:   stock.AvgPrice,
+		BrokerID:   stock.BrokerID,
+		BrokerName: stock.BrokerName,
+		CreatedAt:  stock.CreatedAt,
+		UpdatedAt:  stock.UpdatedAt,
+	}
+}
+
+// convertStocksToDTO converts multiple stocks to DTO format
+func (s *BrokersService) convertStocksToDTO(stocks []models.StockHolding) []dto.StocksData {
+	stocksData := make([]dto.StocksData, 0, len(stocks))
+	for _, stock := range stocks {
+		stocksData = append(stocksData, s.convertStockToDTO(stock))
+	}
+	return stocksData
+}
+
 func (s *BrokersService) TransferCashBetweenBrokers(userID uint, payload *dto.TransferCashRequest) (*dto.BasicResponse, error) {
 	brokerFrom, err := s.BrokersRepository.GetBrokerById(userID, payload.FromBrokerId)
 	if err != nil {
@@ -104,20 +128,7 @@ func (s *BrokersService) GetBrokersDetails(userID uint, brokerName []string) (*d
 	var brokerList []dto.BrokerDetails
 
 	for _, broker := range brokers {
-		var stocksData []dto.StocksData
-		for _, stock := range broker.Stocks {
-			stocksData = append(stocksData, dto.StocksData{
-				Id:         stock.Id,
-				Ticker:     stock.Ticker,
-				Sector:     stock.Sector,
-				Lot:        stock.Lot,
-				AvgPrice:   stock.AvgPrice,
-				BrokerID:   stock.BrokerID,
-				BrokerName: stock.BrokerName,
-				CreatedAt:  stock.CreatedAt,
-				UpdatedAt:  stock.UpdatedAt,
-			})
-		}
+		stocksData := s.convertStocksToDTO(broker.Stocks)
 
 		brokerList = append(brokerList, dto.BrokerDetails{
 			Id:          broker.ID,
@@ -151,17 +162,7 @@ func (s *BrokersService) GetAllBrokersDetails(userID uint) (*dto.BrokersResponse
 
 	holdingsMap := make(map[int][]dto.StocksData)
 	for _, stock := range holdings {
-		holdingsMap[stock.BrokerID] = append(holdingsMap[stock.BrokerID], dto.StocksData{
-			Id:         stock.Id,
-			Ticker:     stock.Ticker,
-			Sector:     stock.Sector,
-			Lot:        stock.Lot,
-			AvgPrice:   stock.AvgPrice,
-			BrokerID:   stock.BrokerID,
-			BrokerName: stock.BrokerName,
-			CreatedAt:  stock.CreatedAt,
-			UpdatedAt:  stock.UpdatedAt,
-		})
+		holdingsMap[stock.BrokerID] = append(holdingsMap[stock.BrokerID], s.convertStockToDTO(stock))
 	}
 
 	brokerList := make([]dto.BrokerDetails, 0, len(allBrokers))
