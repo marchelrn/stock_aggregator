@@ -11,17 +11,19 @@ import (
 )
 
 // BrokerDispatcherParser routes parsing requests to broker-specific parsers
-// (Stockbit, Mandiri) based on email metadata or PDF content, falling back to MetadataParser.
+// (Stockbit, Mandiri, Trimegah) based on email metadata or PDF content, falling back to MetadataParser.
 type BrokerDispatcherParser struct {
 	stockbit *StockbitParser
 	mandiri  *MandiriParser
+	trimegah *TrimegahParser
 	metadata *MetadataParser
 }
 
-func NewBrokerDispatcherParser(metadata *MetadataParser, stockbit *StockbitParser, mandiri *MandiriParser) *BrokerDispatcherParser {
+func NewBrokerDispatcherParser(metadata *MetadataParser, stockbit *StockbitParser, mandiri *MandiriParser, trimegah *TrimegahParser) *BrokerDispatcherParser {
 	return &BrokerDispatcherParser{
 		stockbit: stockbit,
 		mandiri:  mandiri,
+		trimegah: trimegah,
 		metadata: metadata,
 	}
 }
@@ -40,6 +42,13 @@ func (d *BrokerDispatcherParser) Parse(pdfBytes []byte) ([]dto.ParsedTrade, erro
 
 	if bytes.Contains(pdfBytes, []byte("MANDIRI")) {
 		trades, err := d.mandiri.Parse(pdfBytes)
+		if err == nil && len(trades) > 0 {
+			return trades, nil
+		}
+	}
+
+	if bytes.Contains(pdfBytes, []byte("TRIMEGAH")) {
+		trades, err := d.trimegah.Parse(pdfBytes)
 		if err == nil && len(trades) > 0 {
 			return trades, nil
 		}
@@ -80,6 +89,16 @@ func (d *BrokerDispatcherParser) ParseEmail(ctx context.Context, data []byte, me
 		}
 	}
 
+	if strings.Contains(from, "trimegah") || strings.Contains(from, "trim.operation") || strings.Contains(subj, "tc") || bytes.Contains(data, []byte("TRIMEGAH")) {
+		trades, err := d.trimegah.ParseEmail(ctx, data, meta)
+		if err == nil && len(trades) > 0 {
+			return trades, nil
+		}
+		if errors.Is(err, ErrEmailNotApplicable) {
+			return nil, ErrEmailNotApplicable
+		}
+	}
+
 	// Try stockbit parser
 	trades, err := d.stockbit.ParseEmail(ctx, data, meta)
 	if err == nil && len(trades) > 0 {
@@ -112,5 +131,7 @@ func (d *BrokerDispatcherParser) EmailSelectors(ctx context.Context) ([]EmailMet
 	}
 	return []EmailMetadata{
 		{From: "no-reply@stockbit.com", Subject: "Trade Confirmation"},
+		{From: "trim.operation@trimegah.com", Subject: "TC"},
+		{From: "trim.operation@trimegah.com", Subject: "Trade Confirmation"},
 	}, nil
 }

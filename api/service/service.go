@@ -14,7 +14,8 @@ func New(repo *contract.Repository) (*contract.Service, error) {
 	metadataParser := parser.NewMetadataParser(repo.PDFTemplates)
 	stockbitParser := parser.NewStockbitParser()
 	mandiriParser := parser.NewMandiriParser()
-	dispatcher := parser.NewBrokerDispatcherParser(metadataParser, stockbitParser, mandiriParser)
+	trimegahParser := parser.NewTrimegahParser()
+	dispatcher := parser.NewBrokerDispatcherParser(metadataParser, stockbitParser, mandiriParser, trimegahParser)
 
 	yahooSvc := ImplYahooService(repo.Yahoo)
 
