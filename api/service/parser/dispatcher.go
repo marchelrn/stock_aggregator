@@ -11,9 +11,10 @@ import (
 )
 
 // BrokerDispatcherParser routes parsing requests to broker-specific parsers
-// (Stockbit, Mandiri, Trimegah) based on email metadata or PDF content, falling back to MetadataParser.
+// (Stockbit, EIPO, Mandiri, Trimegah) based on email metadata or PDF content, falling back to MetadataParser.
 type BrokerDispatcherParser struct {
 	stockbit *StockbitParser
+	eipo     *StockbitEIPOParser
 	mandiri  *MandiriParser
 	trimegah *TrimegahParser
 	metadata *MetadataParser
@@ -22,6 +23,7 @@ type BrokerDispatcherParser struct {
 func NewBrokerDispatcherParser(metadata *MetadataParser, stockbit *StockbitParser, mandiri *MandiriParser, trimegah *TrimegahParser) *BrokerDispatcherParser {
 	return &BrokerDispatcherParser{
 		stockbit: stockbit,
+		eipo:     NewStockbitEIPOParser(),
 		mandiri:  mandiri,
 		trimegah: trimegah,
 		metadata: metadata,
@@ -60,6 +62,15 @@ func (d *BrokerDispatcherParser) Parse(pdfBytes []byte) ([]dto.ParsedTrade, erro
 		return trades, nil
 	}
 
+	// IPO allotment confirmations keep an "Allotment Date" header instead of
+	// the regular trade table.
+	if bytes.Contains(pdfBytes, []byte("Allotment Date")) {
+		trades, err := d.eipo.Parse(pdfBytes)
+		if err == nil && len(trades) > 0 {
+			return trades, nil
+		}
+	}
+
 	if d.metadata != nil {
 		return d.metadata.Parse(pdfBytes)
 	}
@@ -71,6 +82,19 @@ func (d *BrokerDispatcherParser) ParseEmail(ctx context.Context, data []byte, me
 	from := strings.ToLower(meta.From)
 	subj := strings.ToLower(meta.Subject)
 	filename := strings.ToLower(meta.Filename)
+
+	// IPO allotment confirmations (TC_EIPO_*.pdf) use a different table layout
+	// (Buy/Refund columns) and must be routed before the regular Stockbit
+	// parser, which rejects them as inapplicable.
+	if strings.Contains(filename, "eipo") || strings.Contains(subj, "ipo") {
+		trades, err := d.eipo.ParseEmail(ctx, data, meta)
+		if err == nil && len(trades) > 0 {
+			return trades, nil
+		}
+		if errors.Is(err, ErrEmailNotApplicable) {
+			return nil, ErrEmailNotApplicable
+		}
+	}
 
 	if strings.Contains(from, "stockbit") || strings.Contains(subj, "stockbit") || strings.Contains(filename, "tc_") || bytes.Contains(data, []byte("STOCKBIT")) {
 		trades, err := d.stockbit.ParseEmail(ctx, data, meta)

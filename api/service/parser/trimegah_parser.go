@@ -157,6 +157,14 @@ func (p *TrimegahParser) ParseWithMeta(pdfBytes []byte, meta *EmailMetadata) ([]
 	content := allText.String()
 	log.Printf("Trimegah PDF content length: %d chars", len(content))
 	if strings.TrimSpace(content) == "" {
+		// Template-based PDFs store text inside a Form XObject that
+		// ledongthuc/pdf cannot reach; retry with pdftotext (Poppler).
+		if text, ferr := extractPDFTextWithFallback(pdfBytes); ferr == nil && strings.TrimSpace(text) != "" {
+			content = text
+			log.Printf("Trimegah PDF content length after Poppler fallback: %d chars", len(content))
+		}
+	}
+	if strings.TrimSpace(content) == "" {
 		return nil, fmt.Errorf("%w: PDF contains no extractable text", ErrEmailNotApplicable)
 	}
 

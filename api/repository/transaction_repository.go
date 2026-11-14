@@ -235,7 +235,13 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 		dateStr  string
 	}
 
-	// 1. Resolve brokers and normalize fields
+	// 1. Resolve brokers, normalize fields, and drop duplicates within the batch.
+	// Stockbit delivers duplicate TC emails for the same confirmation; without
+	// this pass the unique partial index on (user_id, ref_no) would abort the
+	// whole batch when both copies land in the same group.
+	seenRefs := make(map[string]struct{}, len(trades))
+	seenIdentities := make(map[string]struct{}, len(trades))
+	deduped := make([]*models.Transaction, 0, len(trades))
 	for _, trade := range trades {
 		trade.UserID = userID
 		if trade.Date.IsZero() {
@@ -257,6 +263,36 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 				}
 			}
 		}
+
+		if trade.RefNo != "" {
+			// Numeric RefNos appear with and without leading zeros depending on
+			// the document (daily TC vs per-trade email); canonicalize so the
+			// same confirmation dedupes and matches the unique index.
+			ref := strings.TrimSpace(trade.RefNo)
+			canonical := strings.TrimLeft(ref, "0")
+			if canonical == "" {
+				canonical = ref
+			}
+			trade.RefNo = canonical
+			if _, dup := seenRefs[canonical]; dup {
+				continue
+			}
+			seenRefs[canonical] = struct{}{}
+		} else {
+			identity := fmt.Sprintf("%s|%s|%d|%s|%s|%d",
+				trade.Ticker, trade.Type, trade.Lot,
+				strconv.FormatFloat(trade.Price, 'f', -1, 64),
+				trade.Date.Format("2006-01-02"), trade.BrokerID)
+			if _, dup := seenIdentities[identity]; dup {
+				continue
+			}
+			seenIdentities[identity] = struct{}{}
+		}
+		deduped = append(deduped, trade)
+	}
+	trades = deduped
+	if len(trades) == 0 {
+		return 0, nil
 	}
 
 	// 2. Group by (BrokerID, Date)
@@ -282,10 +318,12 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 	})
 
 	syncedCount := 0
+	var groupErrs []error
 
 	// 3. Process each group in an isolated transaction
 	for _, key := range orderedKeys {
 		groupTrades := grouped[key]
+		groupSynced := 0
 
 		err := r.db.Transaction(func(tx *gorm.DB) error {
 			var broker models.Broker
@@ -405,7 +443,7 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 					if err := tx.Create(trade).Error; err != nil {
 						return err
 					}
-					syncedCount++
+					groupSynced++
 				}
 
 				// Reconcile holding across the full transaction history to guarantee
@@ -428,9 +466,18 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 		})
 
 		if err != nil {
+			// Keep processing the remaining days so one bad group does not
+			// discard the rest of the history; the aggregated error still
+			// propagates so the caller does not advance its checkpoint.
 			log.Printf("Failed syncing trade confirmation batch for broker %d on %s: %v", key.brokerID, key.dateStr, err)
-			return syncedCount, err
+			groupErrs = append(groupErrs, fmt.Errorf("broker %d tanggal %s: %w", key.brokerID, key.dateStr, err))
+			continue
 		}
+		syncedCount += groupSynced
+	}
+
+	if len(groupErrs) > 0 {
+		return syncedCount, fmt.Errorf("gagal menyimpan %d kelompok transaksi (contoh: %w)", len(groupErrs), groupErrs[0])
 	}
 
 	return syncedCount, nil

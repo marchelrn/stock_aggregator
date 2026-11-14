@@ -31,7 +31,18 @@ func (c *GmailController) SyncTradeConfirmations(ctx *gin.Context) {
 		return
 	}
 
-	response, err := c.service.Gmail.SyncTradeConfirmations(uint(uid))
+	// Check if full sync is requested
+	fullSync := ctx.Query("full") == "true"
+
+	var response interface{}
+	var err error
+
+	if fullSync {
+		response, err = c.service.Gmail.SyncTradeConfirmationsFullContext(ctx, uint(uid))
+	} else {
+		response, err = c.service.Gmail.SyncTradeConfirmations(uint(uid))
+	}
+
 	if err != nil {
 		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
 		return

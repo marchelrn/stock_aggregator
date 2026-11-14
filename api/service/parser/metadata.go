@@ -271,6 +271,15 @@ func extractMetadataPDF(ctx context.Context, data []byte) (content string, err e
 			content, err = "", errors.New("PDF extraction failed")
 		}
 	}()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	// Template-based PDFs store text inside a Form XObject that ledongthuc/pdf
+	// cannot reach; extractPDFTextWithFallback retries with pdftotext first
+	// when the library yields almost nothing.
+	if text, ferr := extractPDFTextWithFallback(data); ferr == nil && len(strings.TrimSpace(text)) > 5 {
+		return text, nil
+	}
 	r, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return "", errors.New("cannot read PDF")

@@ -5,6 +5,51 @@ import (
 	"testing"
 )
 
+// TC_EIPO files carry a "Buy/Refund" table with the ticker attached to the
+// company name; they must be routed to the EIPO parser, not the regular
+// Stockbit parser (which rejects them as inapplicable).
+func TestBrokerDispatcherParser_EIPORouting(t *testing.T) {
+	metadata := NewMetadataParser(nil)
+	dispatcher := NewBrokerDispatcherParser(metadata, NewStockbitParser(), NewMandiriParser(), NewTrimegahParser())
+
+	pdf := metadataTestPDF(`Trade Confirmation
+Allotment Date
+07/07/2025
+REF #
+Board
+Share
+Lot
+Quantity
+Price
+Buy
+Refund
+MP9WSLPZK8
+IPO
+CDIA PT Chandra Daya Investasi Tbk
+11
+1,100
+190
+209,000
+0`)
+
+	meta := EmailMetadata{
+		From:     "confirmation@stockbit.com",
+		Subject:  "Trade Confirmation - IPO",
+		Filename: "TC_EIPO_CDIA_1789262_20250710.pdf",
+	}
+
+	trades, err := dispatcher.ParseEmail(context.Background(), pdf, meta)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(trades) != 1 {
+		t.Fatalf("expected 1 EIPO trade, got %d: %+v", len(trades), trades)
+	}
+	if tr := trades[0]; tr.Ticker != "CDIA" || tr.Type != "BUY" || tr.Lot != 11 || tr.Price != 190 {
+		t.Errorf("unexpected trade: %+v", tr)
+	}
+}
+
 func TestBrokerDispatcherParser_TrimegahRouting(t *testing.T) {
 	metadata := NewMetadataParser(nil)
 	stockbit := NewStockbitParser()

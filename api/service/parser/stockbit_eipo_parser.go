@@ -20,7 +20,10 @@ func NewStockbitEIPOParser() *StockbitEIPOParser {
 	return &StockbitEIPOParser{}
 }
 
-func (p *StockbitEIPOParser) BrokerName() string { return "Stockbit EIPO" }
+// BrokerName returns the broker the allotment settles into. IPO confirmations
+// are issued by Stockbit for the same RDN account, so they must map to the
+// same broker (not a separate "Stockbit EIPO" broker).
+func (p *StockbitEIPOParser) BrokerName() string { return "Stockbit Sekuritas" }
 
 func (p *StockbitEIPOParser) Parse(data []byte) ([]dto.ParsedTrade, error) {
 	content, err := extractPDFTextWithFallback(data)
@@ -58,7 +61,7 @@ func (p *StockbitEIPOParser) parseContent(content string) ([]dto.ParsedTrade, er
 		lines[i] = strings.TrimSpace(lines[i])
 	}
 
-	trades := extractEIPOTrades(lines, tradeDate)
+	trades := p.extractEIPOTrades(lines, tradeDate)
 	if len(trades) == 0 {
 		// No allotment (Buy = 0 for all rows, e.g. JELI refund-only)
 		return nil, ErrEmailNotApplicable
@@ -89,10 +92,14 @@ func extractEIPODate(content string) time.Time {
 // refNumPattern matches a REF # that is 5+ digits (possibly alphanumeric for older PDFs)
 var eipoRefPattern = regexp.MustCompile(`^[A-Z0-9]{5,}$`)
 
+// shareCellPattern matches a Share cell that starts with the 4-letter ticker,
+// e.g. "CDIA PT Chandra Daya Investasi Tbk", as well as a standalone ticker.
+var shareCellPattern = regexp.MustCompile(`^([A-Z]{4})(?:\s|$)`)
+
 // extractEIPOTrades finds rows in the IPO table where Buy > 0.
 // The table header is "REF #  Board  Share  Lot  Quantity  Price  Buy  Refund".
 // Cells may appear on separate lines (multi-line extraction) or one line.
-func extractEIPOTrades(lines []string, tradeDate time.Time) []dto.ParsedTrade {
+func (p *StockbitEIPOParser) extractEIPOTrades(lines []string, tradeDate time.Time) []dto.ParsedTrade {
 	boardPattern := regexp.MustCompile(`^(?:IPO|RG|NG|TN|UH)$`)
 
 	// Try single-line format first:
@@ -140,6 +147,7 @@ func extractEIPOTrades(lines []string, tradeDate time.Time) []dto.ParsedTrade {
 					AmountDone: gross + tax,
 					Date:       tradeDate,
 					RefNo:      refNo,
+					BrokerName: p.BrokerName(),
 				})
 			}
 			i++
@@ -157,7 +165,8 @@ func extractEIPOTrades(lines []string, tradeDate time.Time) []dto.ParsedTrade {
 			// block[0]=REF#, block[1]=Board, block[2]=ticker or start of share name
 			if len(block) >= 7 && boardPattern.MatchString(safeGet(block, 1)) {
 				refNo := block[0]
-				// Find ticker (4 uppercase letters)
+				// Find ticker: either a standalone 4-letter cell or the first
+				// cell of the Share column ("CDIA PT Chandra Daya Investasi Tbk").
 				ticker := ""
 				tickerIdx := -1
 				for bi, b := range block[2:] {
@@ -166,19 +175,24 @@ func extractEIPOTrades(lines []string, tradeDate time.Time) []dto.ParsedTrade {
 						tickerIdx = bi + 2
 						break
 					}
+					if m := shareCellPattern.FindStringSubmatch(b); m != nil {
+						ticker = m[1]
+						tickerIdx = bi + 2
+						break
+					}
 				}
 				if ticker == "" || tickerIdx < 0 {
 					i++
 					continue
 				}
-				// Numbers after ticker: Lot, Quantity, Price, Buy, Refund
+				// Numbers after ticker: Lot, Quantity, Price, Buy, Refund.
+				// Accept any parseable number (including "0" / "0.00") so the
+				// Buy/Refund columns stay aligned regardless of formatting.
 				var nums []float64
 				for _, b := range block[tickerIdx+1:] {
-					if v := parseEIPOFloat(b); v > 0 || b == "0" {
-						f, err := strconv.ParseFloat(strings.ReplaceAll(b, ",", ""), 64)
-						if err == nil {
-							nums = append(nums, f)
-						}
+					clean := strings.ReplaceAll(strings.TrimSpace(b), ",", "")
+					if f, err := strconv.ParseFloat(clean, 64); err == nil {
+						nums = append(nums, f)
 					}
 				}
 				// Expect at least: lot, quantity, price, buy, refund
@@ -198,6 +212,7 @@ func extractEIPOTrades(lines []string, tradeDate time.Time) []dto.ParsedTrade {
 							AmountDone: gross + tax,
 							Date:       tradeDate,
 							RefNo:      refNo,
+							BrokerName: p.BrokerName(),
 						})
 					}
 				}

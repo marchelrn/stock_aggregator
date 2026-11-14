@@ -176,6 +176,32 @@ func (s *GmailServiceImpl) SyncTradeConfirmations(userID uint) (*dto.GmailSyncRe
 	return s.SyncTradeConfirmationsContext(context.Background(), userID)
 }
 
+// SyncTradeConfirmationsFullContext performs a full sync of all historical trade confirmations
+func (s *GmailServiceImpl) SyncTradeConfirmationsFullContext(ctx context.Context, userID uint) (*dto.GmailSyncResponse, error) {
+	startedAt := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, gmailSyncTimeout)
+	defer cancel()
+
+	// Find user
+	user, err := s.AuthRepository.FindByID(userID)
+	if err != nil {
+		return nil, errs.NotFound("User tidak ditemukan")
+	}
+
+	if !user.GmailSyncEnabled {
+		return nil, errs.BadRequest("Gmail sync belum diaktifkan. Silakan login ulang via Google.")
+	}
+
+	// Create Gmail client
+	gmailSrv, err := s.getGmailClient(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
+	// For full sync, pass nil as syncDate to search all emails from the beginning
+	return s.syncTradeConfirmationsWithDate(ctx, gmailSrv, user, startedAt, nil)
+}
+
 // SyncTradeConfirmationsContext allows callers to cancel Gmail and token refresh requests.
 func (s *GmailServiceImpl) SyncTradeConfirmationsContext(ctx context.Context, userID uint) (*dto.GmailSyncResponse, error) {
 	startedAt := time.Now()
@@ -198,14 +224,24 @@ func (s *GmailServiceImpl) SyncTradeConfirmationsContext(ctx context.Context, us
 		return nil, err
 	}
 
+	// For incremental sync, use LastGmailSyncAt or CreatedAt
 	return s.syncTradeConfirmations(ctx, gmailSrv, user, startedAt)
 }
 
+// syncTradeConfirmations performs an incremental sync starting from the user's
+// checkpoint (LastGmailSyncAt, falling back to CreatedAt). It delegates to
+// syncTradeConfirmationsWithDate and exists so tests can inject a fake Gmail
+// service directly.
 func (s *GmailServiceImpl) syncTradeConfirmations(ctx context.Context, gmailSrv *gmail.Service, user *models.Users, startedAt time.Time) (*dto.GmailSyncResponse, error) {
 	syncDate := user.LastGmailSyncAt
 	if syncDate == nil && !user.CreatedAt.IsZero() {
 		syncDate = &user.CreatedAt
 	}
+	return s.syncTradeConfirmationsWithDate(ctx, gmailSrv, user, startedAt, syncDate)
+}
+
+// syncTradeConfirmationsWithDate performs sync with a specific sync date
+func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, gmailSrv *gmail.Service, user *models.Users, startedAt time.Time, syncDate *time.Time) (*dto.GmailSyncResponse, error) {
 	query, err := s.tradeConfirmationQuery(ctx, syncDate)
 	if err != nil {
 		return nil, err
@@ -218,16 +254,21 @@ func (s *GmailServiceImpl) syncTradeConfirmations(ctx context.Context, gmailSrv 
 		if err != nil {
 			return nil, fmt.Errorf("search Gmail messages: %w", err)
 		}
+		log.Printf("Found %d messages in Gmail search", len(messages.Messages))
 		for _, msg := range messages.Messages {
 			if msg == nil || msg.Id == "" {
 				return nil, fmt.Errorf("Gmail search returned a message without an ID")
 			}
 			fullMsg, err := gmailSrv.Users.Messages.Get("me", msg.Id).Format("full").Context(ctx).Do()
 			if err != nil {
+				// Hard failure: abort so the checkpoint is not advanced and the
+				// message is retried on the next sync instead of being skipped forever.
 				return nil, fmt.Errorf("get Gmail message %s: %w", msg.Id, err)
 			}
 			trades, err := s.processMessageAttachments(ctx, gmailSrv, fullMsg)
 			if err != nil {
+				// Inapplicable/unreadable PDFs are soft-skipped inside
+				// processMessageAttachments; any error reaching here is fatal.
 				return nil, fmt.Errorf("process Gmail message %s: %w", msg.Id, err)
 			}
 			allTrades = append(allTrades, trades...)
@@ -258,7 +299,9 @@ func (s *GmailServiceImpl) syncTradeConfirmations(ctx context.Context, gmailSrv 
 
 		synced, err := s.TransactionRepo.SyncTradeConfirmationBatch(user.Id, txReqs)
 		if err != nil {
-			log.Printf("Failed to sync trade confirmation batch: %v", err)
+			// Do not advance the checkpoint: the failed groups must be retried
+			// on the next sync instead of being skipped forever.
+			return nil, fmt.Errorf("save parsed trades: %w", err)
 		}
 		syncedCount = synced
 	}
@@ -458,11 +501,10 @@ func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmai
 }
 
 // buildCashMutationQuery builds a Gmail search query for cash mutation emails
+// Cash mutations are text/HTML body emails, not PDF attachments
 func buildCashMutationQuery(lastSyncAt *time.Time) string {
 	parts := []string{
 		`subject:("deposit" OR "penarikan" OR "withdrawal" OR "top up" OR "mutasi kas")`,
-		"has:attachment",
-		"filename:pdf",
 	}
 
 	if lastSyncAt != nil {
@@ -477,14 +519,18 @@ func (s *GmailServiceImpl) cashMutationQuery(ctx context.Context, lastSyncAt *ti
 	query := buildCashMutationQuery(lastSyncAt)
 	provider, ok := s.TradeParser.(emailSelectorProvider)
 	if !ok {
+		// No email selector provider, proceed with basic query
 		return query, nil
 	}
 	selectors, err := provider.EmailSelectors(ctx)
 	if err != nil {
-		return "", fmt.Errorf("load Gmail email selectors: %w", err)
+		// If there's an error loading selectors, proceed with basic query
+		log.Printf("Warning: failed to load email selectors for cash mutations: %v", err)
+		return query, nil
 	}
 	if len(selectors) == 0 {
-		return "", fmt.Errorf("no active PDF email selectors")
+		// No active selectors, proceed with basic query (don't filter by sender)
+		return query, nil
 	}
 
 	var senders []string
@@ -495,7 +541,8 @@ func (s *GmailServiceImpl) cashMutationQuery(ctx context.Context, lastSyncAt *ti
 		}
 		address, err := mail.ParseAddress(selector.From)
 		if err != nil || address.Address != selector.From || strings.ContainsAny(selector.From, "\r\n\"\\") {
-			return "", fmt.Errorf("invalid Gmail selector sender %q", selector.From)
+			log.Printf("Warning: invalid Gmail selector sender %q: %v", selector.From, err)
+			continue
 		}
 		key := strings.ToLower(selector.From)
 		if !seen[key] {

@@ -53,6 +53,14 @@ func (p *MandiriParser) Parse(pdfBytes []byte) ([]dto.ParsedTrade, error) {
 
 	content := allText.String()
 	log.Printf("PDF content length: %d chars", len(content))
+	if strings.TrimSpace(content) == "" {
+		// Template-based PDFs store text inside a Form XObject that
+		// ledongthuc/pdf cannot reach; retry with pdftotext (Poppler).
+		if text, ferr := extractPDFTextWithFallback(pdfBytes); ferr == nil && strings.TrimSpace(text) != "" {
+			content = text
+			log.Printf("PDF content length after Poppler fallback: %d chars", len(content))
+		}
+	}
 
 	return p.parseContent(content)
 }

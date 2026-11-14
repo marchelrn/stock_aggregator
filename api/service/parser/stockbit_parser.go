@@ -1,7 +1,6 @@
 package parser
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledongthuc/pdf"
 	"github.com/marchelrn/stock_api/dto"
 )
 
@@ -29,32 +27,13 @@ func (p *StockbitParser) BrokerName() string {
 
 // Parse reads a trade confirmation PDF from Stockbit and extracts trade data
 func (p *StockbitParser) Parse(pdfBytes []byte) ([]dto.ParsedTrade, error) {
-	reader := bytes.NewReader(pdfBytes)
-
-	pdfReader, err := pdf.NewReader(reader, int64(len(pdfBytes)))
+	// ledongthuc/pdf cannot read PDFs whose content lives inside a Form
+	// XObject (GoFPDF templates); extractPDFTextWithFallback retries with
+	// pdftotext (Poppler) when the first attempt yields almost nothing.
+	content, err := extractPDFTextWithFallback(pdfBytes)
 	if err != nil {
 		return nil, fmt.Errorf("gagal membaca PDF: %w", err)
 	}
-
-	var allText strings.Builder
-	numPages := pdfReader.NumPage()
-
-	for i := 1; i <= numPages; i++ {
-		page := pdfReader.Page(i)
-		if page.V.IsNull() {
-			continue
-		}
-
-		text, err := page.GetPlainText(nil)
-		if err != nil {
-			log.Printf("Warning: gagal membaca halaman %d: %v", i, err)
-			continue
-		}
-		allText.WriteString(text)
-		allText.WriteString("\n")
-	}
-
-	content := allText.String()
 	log.Printf("Stockbit PDF content length: %d chars", len(content))
 	if strings.TrimSpace(content) == "" {
 		return nil, fmt.Errorf("%w: PDF contains no extractable text", ErrEmailNotApplicable)
