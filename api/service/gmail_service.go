@@ -106,6 +106,15 @@ func (s *GmailServiceImpl) convertCashMutationToDTO(m *models.CashMutation) dto.
 	}
 }
 
+// normalizeStoredTimestamp rebuilds a timestamp read from a
+// `timestamp without time zone` column. The value is written using the
+// process's local wall clock, but the driver labels it as UTC; without
+// normalizing, an expiry 1 hour ahead appears ~timezone-offset hours ahead,
+// so the OAuth token is never refreshed and Gmail rejects the stale one.
+func normalizeStoredTimestamp(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.Local)
+}
+
 // getGmailClient creates a Gmail API client using the user's stored OAuth tokens
 func (s *GmailServiceImpl) getGmailClient(ctx context.Context, user *models.Users) (*gmail.Service, error) {
 	cfg := config.GetConfig()
@@ -131,7 +140,7 @@ func (s *GmailServiceImpl) getGmailClient(ctx context.Context, user *models.User
 
 	var expiry time.Time
 	if user.GmailTokenExpiry != nil {
-		expiry = *user.GmailTokenExpiry
+		expiry = normalizeStoredTimestamp(*user.GmailTokenExpiry)
 	}
 
 	token := &oauth2.Token{
@@ -375,7 +384,6 @@ func (s *GmailServiceImpl) GetCashMutations(userID uint) (*dto.CashMutationsList
 
 // SyncCashMutationsContext allows callers to cancel Gmail and token refresh requests.
 func (s *GmailServiceImpl) SyncCashMutationsContext(ctx context.Context, userID uint) (*dto.GmailCashSyncResponse, error) {
-	startedAt := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, gmailSyncTimeout)
 	defer cancel()
 
@@ -395,15 +403,16 @@ func (s *GmailServiceImpl) SyncCashMutationsContext(ctx context.Context, userID 
 		return nil, err
 	}
 
-	return s.syncCashMutations(ctx, gmailSrv, user, startedAt)
+	return s.syncCashMutations(ctx, gmailSrv, user)
 }
 
-func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmail.Service, user *models.Users, startedAt time.Time) (*dto.GmailCashSyncResponse, error) {
-	syncDate := user.LastGmailSyncAt
-	if syncDate == nil && !user.CreatedAt.IsZero() {
-		syncDate = &user.CreatedAt
-	}
-	query, err := s.cashMutationQuery(ctx, syncDate)
+func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmail.Service, user *models.Users) (*dto.GmailCashSyncResponse, error) {
+	// Cash mutation emails are scanned from the beginning on every run.
+	// They are few, SyncCashMutationBatch deduplicates them, and the shared
+	// trade checkpoint (LastGmailSyncAt) must not hide historical deposits:
+	// after a full trade sync the checkpoint is "now", which would make the
+	// deposit sync report "no new emails" forever.
+	query, err := s.cashMutationQuery(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -477,13 +486,9 @@ func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmai
 		syncedCount = synced
 	}
 
-	// Update sync checkpoint
-	updated := *user
-	updated.LastGmailSyncAt = &startedAt
-	if _, err := s.AuthRepository.UpdateUser(&updated); err != nil {
-		return nil, fmt.Errorf("save Gmail sync checkpoint: %w", err)
-	}
-	*user = updated
+	// Do not touch LastGmailSyncAt here: it is the trade-confirmation
+	// checkpoint, and advancing it from the cash sync would skip trade
+	// emails that arrived since the last trade sync.
 
 	message := fmt.Sprintf("Berhasil parse %d mutasi kas dari %d email, disimpan %d mutasi", len(allMutations), emailCount, syncedCount)
 	if s.TransactionRepo == nil {

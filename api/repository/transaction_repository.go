@@ -39,20 +39,16 @@ func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.
 			return err
 		}
 
-		// First check by RefNo (unique per trade confirmation)
-		if payload.RefNo != "" {
-			var existingByRef models.Transaction
-			err := tx.Where("user_id = ? AND ref_no = ?", payload.UserID, payload.RefNo).First(&existingByRef).Error
-			if err == nil {
-				return nil // Already processed this trade confirmation
-			} else if err != gorm.ErrRecordNotFound {
-				return err
-			}
-		}
+		// NOTE: duplicate detection is identity-based (ticker/type/lot/price/
+		// date below). RefNo must not be used as a uniqueness key: a single
+		// trade confirmation legitimately contains several fills that share
+		// the same Ref#, and blocking the second fill would corrupt holdings.
 
 		var existing models.Transaction
-		err := tx.Where("user_id = ? AND ticker = ? AND type = ? AND lot = ? AND price = ? AND DATE(date) = DATE(?) AND broker_id = ?",
-			payload.UserID, payload.Ticker, payload.Type, payload.Lot, payload.Price, payload.Date, payload.BrokerID).
+		// Compare the date as a plain string: DATE(?) with a zoned
+		// time.Time would shift the day for late-evening trades.
+		err := tx.Where("user_id = ? AND ticker = ? AND type = ? AND lot = ? AND price = ? AND DATE(date) = ? AND broker_id = ?",
+			payload.UserID, payload.Ticker, payload.Type, payload.Lot, payload.Price, payload.Date.Format("2006-01-02"), payload.BrokerID).
 			First(&existing).Error
 		if err == nil {
 			if (existing.Date.Hour() == 0 && existing.Date.Minute() == 0 && existing.Date.Second() == 0) &&
@@ -236,10 +232,15 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 	}
 
 	// 1. Resolve brokers, normalize fields, and drop duplicates within the batch.
-	// Stockbit delivers duplicate TC emails for the same confirmation; without
-	// this pass the unique partial index on (user_id, ref_no) would abort the
-	// whole batch when both copies land in the same group.
-	seenRefs := make(map[string]struct{}, len(trades))
+	// Stockbit delivers duplicate TC emails for the same confirmation, so the
+	// same row can appear twice in one batch. Two keys are used:
+	//   - (ref, ticker, type, lot, price): one confirmation can carry several
+	//     fills sharing a Ref# (partial executions), but the same fill may also
+	//     arrive in documents with different timestamps/dates — RefNo with the
+	//     fill details identifies it either way.
+	//   - (ticker, type, lot, price, date, broker): catches copies with empty
+	//     or differing RefNos (e.g. daily TC vs per-trade email).
+	seenRefFills := make(map[string]struct{}, len(trades))
 	seenIdentities := make(map[string]struct{}, len(trades))
 	deduped := make([]*models.Transaction, 0, len(trades))
 	for _, trade := range trades {
@@ -267,27 +268,31 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 		if trade.RefNo != "" {
 			// Numeric RefNos appear with and without leading zeros depending on
 			// the document (daily TC vs per-trade email); canonicalize so the
-			// same confirmation dedupes and matches the unique index.
+			// same confirmation is stored consistently.
 			ref := strings.TrimSpace(trade.RefNo)
 			canonical := strings.TrimLeft(ref, "0")
 			if canonical == "" {
 				canonical = ref
 			}
 			trade.RefNo = canonical
-			if _, dup := seenRefs[canonical]; dup {
+
+			refFill := fmt.Sprintf("%s|%s|%s|%d|%s",
+				trade.RefNo, trade.Ticker, trade.Type, trade.Lot,
+				strconv.FormatFloat(trade.Price, 'f', -1, 64))
+			if _, dup := seenRefFills[refFill]; dup {
 				continue
 			}
-			seenRefs[canonical] = struct{}{}
-		} else {
-			identity := fmt.Sprintf("%s|%s|%d|%s|%s|%d",
-				trade.Ticker, trade.Type, trade.Lot,
-				strconv.FormatFloat(trade.Price, 'f', -1, 64),
-				trade.Date.Format("2006-01-02"), trade.BrokerID)
-			if _, dup := seenIdentities[identity]; dup {
-				continue
-			}
-			seenIdentities[identity] = struct{}{}
+			seenRefFills[refFill] = struct{}{}
 		}
+
+		identity := fmt.Sprintf("%s|%s|%d|%s|%s|%d",
+			trade.Ticker, trade.Type, trade.Lot,
+			strconv.FormatFloat(trade.Price, 'f', -1, 64),
+			trade.Date.Format("2006-01-02"), trade.BrokerID)
+		if _, dup := seenIdentities[identity]; dup {
+			continue
+		}
+		seenIdentities[identity] = struct{}{}
 		deduped = append(deduped, trade)
 	}
 	trades = deduped
@@ -361,20 +366,24 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 				var newTrades []*models.Transaction
 
 				for _, trade := range tradesForTicker {
-					// First check by RefNo (unique per trade confirmation)
+					// Duplicate check: a fill is already stored when the same
+					// RefNo carries the same ticker/type/lot/price (a
+					// confirmation may repeat in documents with different
+					// dates), or when the identical row exists for the same
+					// date. RefNo alone must NOT be a uniqueness key because
+					// one confirmation can contain several distinct fills.
+					// Dates are compared as plain strings: passing a zoned
+					// time.Time would shift the day for late-evening trades.
+					query := tx.Where("user_id = ? AND ticker = ? AND type = ? AND lot = ? AND price = ? AND broker_id = ?",
+						trade.UserID, trade.Ticker, trade.Type, trade.Lot, trade.Price, trade.BrokerID)
 					if trade.RefNo != "" {
-						var existingByRef models.Transaction
-						err := tx.Where("user_id = ? AND ref_no = ?", trade.UserID, trade.RefNo).First(&existingByRef).Error
-						if err == nil {
-							continue // Already processed this trade confirmation
-						} else if err != gorm.ErrRecordNotFound {
-							return err
-						}
+						query = query.Where("(ref_no = ? OR DATE(date) = ?)",
+							trade.RefNo, trade.Date.Format("2006-01-02"))
+					} else {
+						query = query.Where("DATE(date) = ?", trade.Date.Format("2006-01-02"))
 					}
-
 					var existing models.Transaction
-					err := tx.Where("user_id = ? AND ticker = ? AND type = ? AND lot = ? AND price = ? AND DATE(date) = DATE(?) AND broker_id = ?",
-						trade.UserID, trade.Ticker, trade.Type, trade.Lot, trade.Price, trade.Date, trade.BrokerID).First(&existing).Error
+					err := query.First(&existing).Error
 					if err == nil {
 						if (existing.Date.Hour() == 0 && existing.Date.Minute() == 0 && existing.Date.Second() == 0) &&
 							!(trade.Date.Hour() == 0 && trade.Date.Minute() == 0 && trade.Date.Second() == 0) {
@@ -542,31 +551,31 @@ func CalculateHoldingAfterBatch(currentLot int, currentAvgPrice float64, trades 
 			newAvg = (float64(currentLot)*100*currentAvgPrice + tickerBuyCost) / (float64(newLot) * 100)
 		}
 	} else if tickerBuyLot > 0 && tickerSellLot > 0 {
-		// Both buy and sell on the same stock in this batch
-		if currentLot >= tickerSellLot {
-			// User had enough recorded holding to cover the sell
-			remainingOldLot := currentLot - tickerSellLot
-			newLot = remainingOldLot + tickerBuyLot
-			if remainingOldLot == 0 {
-				newAvg = tickerBuyCost / (float64(newLot) * 100)
-			} else {
-				newAvg = (float64(remainingOldLot)*100*currentAvgPrice + tickerBuyCost) / (float64(newLot) * 100)
-			}
+		// Both buy and sell on the same stock in this batch/day.
+		naiveLot := currentLot + tickerBuyLot - tickerSellLot
+		if naiveLot < 0 {
+			// Sold more than the recorded holding plus today's buys: the user
+			// held an unrecorded prior position that was liquidated. Keep the
+			// legacy result (today's buys remain as the active holding).
+			newLot = tickerBuyLot
+			newAvg = tickerBuyCost / (float64(tickerBuyLot) * 100)
 		} else {
-			// currentLot < tickerSellLot: user sold more lot than recorded in DB.
-			// This occurs when user had an unrecorded prior holding at their broker.
-			if currentLot == 0 && tickerBuyLot == tickerSellLot {
-				// Pure intraday scalp round-trip with no prior position: closed flat
-				newLot = 0
+			// Sells are covered by the recorded holding and today's buys.
+			newLot = naiveLot
+			switch {
+			case newLot == 0:
 				newAvg = 0
-			} else if currentLot == 0 && tickerBuyLot > tickerSellLot {
-				// User bought more than sold today without prior position
-				newLot = tickerBuyLot - tickerSellLot
-				newAvg = tickerBuyCost / (float64(tickerBuyLot) * 100)
-			} else {
-				// User sold an unrecorded prior position (e.g. PART: sold 253 old shares, bought 249 new shares).
-				// The old unrecorded position was liquidated by the sell, and the new buy forms the active holding.
-				newLot = tickerBuyLot
+			case tickerSellLot <= currentLot:
+				// Sells only consumed old shares; blend remaining old + new buys.
+				remainingOldLot := currentLot - tickerSellLot
+				if remainingOldLot == 0 {
+					newAvg = tickerBuyCost / (float64(newLot) * 100)
+				} else {
+					newAvg = (float64(remainingOldLot)*100*currentAvgPrice + tickerBuyCost) / (float64(newLot) * 100)
+				}
+			default:
+				// Sells consumed the whole old position plus part of today's
+				// buys; the remainder consists of today's buys only.
 				newAvg = tickerBuyCost / (float64(tickerBuyLot) * 100)
 			}
 		}

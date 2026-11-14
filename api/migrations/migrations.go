@@ -26,6 +26,7 @@ func getMigrations() []migration {
 		getAlterTablesAddUserID(),
 		getAlterStocksAddSector(),
 		getAddRefNoToTransactions(),
+		getDropUniqueRefNoIndex(),
 		getCreateTableCashMutations(),
 	}
 }
