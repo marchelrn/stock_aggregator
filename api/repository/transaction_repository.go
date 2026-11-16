@@ -75,6 +75,10 @@ func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.
 
 		grossAmount := float64(payload.Lot) * 100 * payload.Price
 
+		// Mode cash-base: transaksi yang terjadi sebelum cutoff sudah
+		// termasuk di saldo dasar, jadi tidak boleh mengubah cash lagi.
+		applyCash := CountsAfterCutoff(payload.Date, broker.CashBaseAsOf)
+
 		// Use the actual tax from the parsed trade confirmation if available,
 		// otherwise fallback to default broker fee rates
 		tax := payload.Tax
@@ -139,7 +143,9 @@ func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.
 			}
 
 			// BUY: cash keluar = gross + tax
-			broker.Cash -= amountDone
+			if applyCash {
+				broker.Cash -= amountDone
+			}
 
 		case models.TypeSell:
 			if err == gorm.ErrRecordNotFound {
@@ -161,7 +167,9 @@ func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.
 			}
 
 			// SELL: cash masuk = gross - tax
-			broker.Cash += (grossAmount - tax)
+			if applyCash {
+				broker.Cash += (grossAmount - tax)
+			}
 
 		default:
 			return fmt.Errorf("invalid transaction type: %s", payload.Type)
@@ -196,7 +204,7 @@ func (r *TransactionRepository) GetTransactions(userID uint, id int) ([]models.T
 
 func (r *TransactionRepository) GetAllTransactions(userID uint) ([]models.Transaction, error) {
 	var transactions []models.Transaction
-	if err := r.db.Where("user_id = ?", userID).Order("date ASC").Find(&transactions).Error; err != nil {
+	if err := r.db.Where("user_id = ?", userID).Order("date DESC").Find(&transactions).Error; err != nil {
 		return nil, err
 	}
 	return transactions, nil
@@ -417,7 +425,7 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 				})
 
 				// Calculate new holding lot, average price, and cash delta
-				newLot, newAvg, tickerCashDelta := CalculateHoldingAfterBatch(currentLot, currentAvgPrice, newTrades)
+				newLot, newAvg, _ := CalculateHoldingAfterBatch(currentLot, currentAvgPrice, newTrades)
 
 				if hasStock {
 					stock.Lot = newLot
@@ -461,7 +469,13 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 					log.Printf("Warning: failed to reconcile stock holding for %s: %v", ticker, err)
 				}
 
-				brokerCashDelta += tickerCashDelta
+				// Mode cash-base: hanya transaksi setelah cutoff yang
+				// mengubah cash. Sebelum cutoff sudah termasuk saldo dasar.
+				for _, trade := range newTrades {
+					if CountsAfterCutoff(trade.Date, broker.CashBaseAsOf) {
+						brokerCashDelta += TradeCashDelta(trade)
+					}
+				}
 			}
 
 			if key.brokerID != 0 && brokerCashDelta != 0 {

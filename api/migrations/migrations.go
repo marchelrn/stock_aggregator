@@ -28,6 +28,7 @@ func getMigrations() []migration {
 		getAddRefNoToTransactions(),
 		getDropUniqueRefNoIndex(),
 		getCreateTableCashMutations(),
+		getAddCashBaseToBrokers(),
 	}
 }
 

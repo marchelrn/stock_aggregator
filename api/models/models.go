@@ -8,8 +8,12 @@ type Broker struct {
 	UserID    uint      `json:"user_id" gorm:"column:user_id;index"`
 	Name      string    `json:"name"`
 	Cash      float64   `json:"cash"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	// CashBase adalah saldo dasar yang di-set manual oleh user.
+	// Selama CashBaseAsOf != nil, cash = CashBase + SUM(delta event setelah cutoff).
+	CashBase     float64    `json:"cash_base"`
+	CashBaseAsOf *time.Time `json:"cash_base_as_of"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 type BrokerDetails struct {
@@ -52,20 +56,24 @@ type CashMutationType string
 const (
 	CashMutationDeposit  CashMutationType = "DEPOSIT"
 	CashMutationWithdraw CashMutationType = "WITHDRAW"
+	CashMutationDividend CashMutationType = "DIVIDEND"
 )
 
 type CashMutation struct {
-	ID          int              `json:"id" gorm:"column:id;primaryKey"`
-	UserID      uint             `json:"user_id" gorm:"column:user_id;index"`
-	BrokerID    int              `json:"broker_id" gorm:"column:broker_id;index"`
-	BrokerName  string           `json:"broker_name" gorm:"column:broker_name"`
-	Type        CashMutationType `json:"type" gorm:"column:type"`
-	Amount      float64          `json:"amount" gorm:"column:amount"`
-	Date        time.Time        `json:"date" gorm:"column:date"`
-	Description string           `json:"description" gorm:"column:description"`
-	RefNo       string           `json:"ref_no" gorm:"column:ref_no"`
-	CreatedAt   time.Time        `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt   time.Time        `json:"updated_at" gorm:"column:updated_at"`
+	ID         int              `json:"id" gorm:"column:id;primaryKey"`
+	UserID     uint             `json:"user_id" gorm:"column:user_id;index"`
+	BrokerID   int              `json:"broker_id" gorm:"column:broker_id;index"`
+	BrokerName string           `json:"broker_name" gorm:"column:broker_name"`
+	Type       CashMutationType `json:"type" gorm:"column:type"`
+	Amount     float64          `json:"amount" gorm:"column:amount"`
+	Date       time.Time        `json:"date" gorm:"column:date"`
+	// EmailReceivedAt adalah waktu email masuk dari broker; dipakai sebagai
+	// waktu efektif event saat membandingkan dengan cash_base_as_of.
+	EmailReceivedAt *time.Time `json:"email_received_at" gorm:"column:email_received_at"`
+	Description     string     `json:"description" gorm:"column:description"`
+	RefNo           string     `json:"ref_no" gorm:"column:ref_no"`
+	CreatedAt       time.Time  `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt       time.Time  `json:"updated_at" gorm:"column:updated_at"`
 }
 
 // Transactions

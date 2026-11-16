@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/marchelrn/stock_api/contract"
 	"github.com/marchelrn/stock_api/dto"
@@ -60,6 +61,14 @@ func (s *BrokersService) TransferCashBetweenBrokers(userID uint, payload *dto.Tr
 
 	brokerFrom.Cash -= payload.Amount
 	brokerTo.Cash += payload.Amount
+	// Penyesuaian manual menggeser saldo dasar juga, agar rumus
+	// cash = cash_base + event setelah cutoff tetap berlaku.
+	if brokerFrom.CashBaseAsOf != nil {
+		brokerFrom.CashBase -= payload.Amount
+	}
+	if brokerTo.CashBaseAsOf != nil {
+		brokerTo.CashBase += payload.Amount
+	}
 
 	_, err = s.BrokersRepository.UpdateBrokerData(userID, payload.FromBrokerId, brokerFrom)
 	if err != nil {
@@ -88,9 +97,11 @@ func (s *BrokersService) GetBroker(userID uint, id int) (*dto.BasicBrokerRespons
 		StatusCode: http.StatusOK,
 		Message:    "Success received Broker",
 		Data: dto.Broker{
-			Id:   broker.ID,
-			Name: broker.Name,
-			Cash: broker.Cash,
+			Id:           broker.ID,
+			Name:         broker.Name,
+			Cash:         broker.Cash,
+			CashBase:     broker.CashBase,
+			CashBaseAsOf: broker.CashBaseAsOf,
 		},
 	}
 	return response, nil
@@ -105,9 +116,11 @@ func (s *BrokersService) GetAllBrokers(userID uint) (*dto.BasicBrokersResponse, 
 	var brokersData []dto.Broker
 	for _, broker := range brokers {
 		brokersData = append(brokersData, dto.Broker{
-			Id:   broker.ID,
-			Name: broker.Name,
-			Cash: broker.Cash,
+			Id:           broker.ID,
+			Name:         broker.Name,
+			Cash:         broker.Cash,
+			CashBase:     broker.CashBase,
+			CashBaseAsOf: broker.CashBaseAsOf,
 		})
 	}
 
@@ -131,11 +144,13 @@ func (s *BrokersService) GetBrokersDetails(userID uint, brokerName []string) (*d
 		stocksData := s.convertStocksToDTO(broker.Stocks)
 
 		brokerList = append(brokerList, dto.BrokerDetails{
-			Id:          broker.ID,
-			Name:        broker.Name,
-			Cash:        broker.Cash,
-			StocksData:  stocksData,
-			StocksCount: len(stocksData),
+			Id:           broker.ID,
+			Name:         broker.Name,
+			Cash:         broker.Cash,
+			CashBase:     broker.CashBase,
+			CashBaseAsOf: broker.CashBaseAsOf,
+			StocksData:   stocksData,
+			StocksCount:  len(stocksData),
 		})
 	}
 
@@ -172,11 +187,13 @@ func (s *BrokersService) GetAllBrokersDetails(userID uint) (*dto.BrokersResponse
 			stocks = []dto.StocksData{}
 		}
 		brokerList = append(brokerList, dto.BrokerDetails{
-			Id:          broker.ID,
-			Name:        broker.Name,
-			Cash:        broker.Cash,
-			StocksData:  stocks,
-			StocksCount: len(stocks),
+			Id:           broker.ID,
+			Name:         broker.Name,
+			Cash:         broker.Cash,
+			CashBase:     broker.CashBase,
+			CashBaseAsOf: broker.CashBaseAsOf,
+			StocksData:   stocks,
+			StocksCount:  len(stocks),
 		})
 	}
 
@@ -227,6 +244,7 @@ func (s *BrokersService) AddBrokerData(userID uint, payload *dto.BrokerRequest) 
 					Id:          brokerModels.ID,
 					Name:        brokerModels.Name,
 					Cash:        brokerModels.Cash,
+					CashBase:    brokerModels.CashBase,
 					StocksData:  []dto.StocksData{},
 					StocksCount: 0,
 				},
@@ -264,9 +282,16 @@ func (s *BrokersService) UpdateBrokerData(userID uint, id int, payload *dto.Brok
 	newDataCash := brokerData.Cash + payload.Cash
 
 	broker := &models.Broker{
-		UserID: userID,
-		Name:   payload.Name,
-		Cash:   newDataCash,
+		UserID:       userID,
+		Name:         payload.Name,
+		Cash:         newDataCash,
+		CashBase:     brokerData.CashBase,
+		CashBaseAsOf: brokerData.CashBaseAsOf,
+	}
+	// Penambahan cash manual juga menggeser saldo dasar bila cutoff sudah
+	// diatur, supaya cash = cash_base + event tetap konsisten.
+	if brokerData.CashBaseAsOf != nil {
+		broker.CashBase = brokerData.CashBase + payload.Cash
 	}
 
 	broker, err = s.BrokersRepository.UpdateBrokerData(userID, id, broker)
@@ -279,4 +304,53 @@ func (s *BrokersService) UpdateBrokerData(userID uint, id int, payload *dto.Brok
 		Message:    fmt.Sprintf("Success Update Broker %s", broker.Name),
 	}
 	return response, nil
+}
+
+// SetCashBase mengatur saldo dasar kas broker pada waktu tertentu, lalu
+// menghitung ulang cash = cash_base + SUM(event setelah cutoff).
+func (s *BrokersService) SetCashBase(userID uint, id int, payload *dto.SetCashBaseRequest) (*dto.CashBreakdownResponse, error) {
+	if payload.CashBase < 0 {
+		return nil, errs.BadRequest("Saldo dasar tidak boleh negatif")
+	}
+
+	asOf := time.Now()
+	if payload.CashBaseAsOf != nil {
+		asOf = *payload.CashBaseAsOf
+	}
+
+	if _, err := s.BrokersRepository.SetCashBase(userID, id, payload.CashBase, asOf); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errs.NotFound("Failed to set cash base : Broker Not Found")
+		}
+		return nil, err
+	}
+
+	breakdown, err := s.BrokersRepository.GetCashBreakdown(userID, id)
+	if err != nil {
+		return nil, err
+	}
+
+	return &dto.CashBreakdownResponse{
+		StatusCode: http.StatusOK,
+		Message:    "Saldo dasar disimpan",
+		Data:       *breakdown,
+	}, nil
+}
+
+// GetCashBreakdown mengembalikan rincian saldo kas: saldo dasar, event
+// setelah cutoff, dan cash hasil hitungannya.
+func (s *BrokersService) GetCashBreakdown(userID uint, id int) (*dto.CashBreakdownResponse, error) {
+	breakdown, err := s.BrokersRepository.GetCashBreakdown(userID, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errs.NotFound("Failed to get cash breakdown : Broker Not Found")
+		}
+		return nil, err
+	}
+
+	return &dto.CashBreakdownResponse{
+		StatusCode: http.StatusOK,
+		Message:    "Rincian saldo kas",
+		Data:       *breakdown,
+	}, nil
 }

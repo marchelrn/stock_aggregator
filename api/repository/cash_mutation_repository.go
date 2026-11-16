@@ -7,6 +7,7 @@ import (
 
 	"github.com/marchelrn/stock_api/models"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type CashMutationRepository struct {
@@ -88,23 +89,30 @@ func (r *CashMutationRepository) SyncCashMutationBatch(userID uint, mutations []
 				return err
 			}
 
-			// Update broker cash
-			var cashDiff float64
-			if item.Type == models.CashMutationDeposit {
-				cashDiff = item.Amount
-			} else if item.Type == models.CashMutationWithdraw {
-				cashDiff = -item.Amount
+			cashDiff := MutationCashDelta(item)
+			if cashDiff == 0 || item.BrokerID <= 0 {
+				return nil
 			}
 
-			if cashDiff != 0 && item.BrokerID > 0 {
-				if err := tx.Model(&models.Broker{}).
-					Where("id = ? AND user_id = ?", item.BrokerID, userID).
-					Update("cash", gorm.Expr("cash + ?", cashDiff)).Error; err != nil {
-					return err
-				}
+			var broker models.Broker
+			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("user_id = ? AND id = ?", userID, item.BrokerID).
+				First(&broker).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			if err != nil {
+				return err
 			}
 
-			return nil
+			// Mode cash-base: mutasi sebelum cutoff sudah termasuk di saldo
+			// dasar, jadi tidak boleh mengubah cash lagi.
+			if !CountsAfterCutoff(CashEventTime(item), broker.CashBaseAsOf) {
+				return nil
+			}
+
+			broker.Cash += cashDiff
+			return tx.Save(&broker).Error
 		})
 
 		if txErr == nil {

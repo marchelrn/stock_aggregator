@@ -64,17 +64,21 @@ type BrokerRequest struct {
 }
 
 type Broker struct {
-	Id   int     `json:"id"`
-	Name string  `json:"name"`
-	Cash float64 `json:"cash"`
+	Id           int        `json:"id"`
+	Name         string     `json:"name"`
+	Cash         float64    `json:"cash"`
+	CashBase     float64    `json:"cash_base"`
+	CashBaseAsOf *time.Time `json:"cash_base_as_of"`
 }
 
 type BrokerDetails struct {
-	Id          int          `json:"id"`
-	Name        string       `json:"name"`
-	Cash        float64      `json:"cash"`
-	StocksData  []StocksData `json:"stocks_data"`
-	StocksCount int          `json:"stocks_count"`
+	Id           int        `json:"id"`
+	Name         string     `json:"name"`
+	Cash         float64    `json:"cash"`
+	CashBase     float64    `json:"cash_base"`
+	CashBaseAsOf *time.Time `json:"cash_base_as_of"`
+	StocksData   []StocksData `json:"stocks_data"`
+	StocksCount  int          `json:"stocks_count"`
 }
 
 // Transactions struct
@@ -88,6 +92,39 @@ type TransferCashRequest struct {
 	FromBrokerId int     `json:"from_broker_id"`
 	ToBrokerId   int     `json:"to_broker_id"`
 	Amount       float64 `json:"amount"`
+}
+
+// SetCashBaseRequest mengatur saldo dasar kas sebuah broker.
+// cash = cash_base + SUM(delta event setelah cash_base_as_of).
+type SetCashBaseRequest struct {
+	CashBase float64 `json:"cash_base"`
+	// CashBaseAsOf titik waktu saldo dasar berlaku; kosong = sekarang.
+	CashBaseAsOf *time.Time `json:"cash_base_as_of"`
+}
+
+// CashEvent adalah satu baris riwayat yang memengaruhi cash setelah cutoff.
+type CashEvent struct {
+	Source      string    `json:"source"` // TRADE | MUTATION
+	Type        string    `json:"type"`   // BUY/SELL/DEPOSIT/WITHDRAW/DIVIDEND
+	Delta       float64   `json:"delta"`
+	Date        time.Time `json:"date"`
+	Description string    `json:"description"`
+}
+
+type CashBreakdown struct {
+	BrokerId     int         `json:"broker_id"`
+	BrokerName   string      `json:"broker_name"`
+	Cash         float64     `json:"cash"`
+	CashBase     float64     `json:"cash_base"`
+	CashBaseAsOf *time.Time  `json:"cash_base_as_of"`
+	EventsTotal  float64     `json:"events_total"`
+	Events       []CashEvent `json:"events"`
+}
+
+type CashBreakdownResponse struct {
+	StatusCode int           `json:"status_code"`
+	Message    string        `json:"message"`
+	Data       CashBreakdown `json:"data"`
 }
 
 type StockTransaction struct {
@@ -210,12 +247,15 @@ type GmailSyncStatusResponse struct {
 }
 
 type ParsedCashMutation struct {
-	BrokerName  string  `json:"broker_name"`
-	Type        string  `json:"type"` // DEPOSIT or WITHDRAW
-	Amount      float64 `json:"amount"`
-	Date        string  `json:"date"`
-	RefNo       string  `json:"ref_no,omitempty"`
+	BrokerName string  `json:"broker_name"`
+	Type       string  `json:"type"` // DEPOSIT, WITHDRAW, or DIVIDEND
+	Amount     float64 `json:"amount"`
+	Date       string  `json:"date"`
+	RefNo      string  `json:"ref_no,omitempty"`
 	Description string  `json:"description,omitempty"`
+	// EmailReceivedAt waktu email diterima; dipakai sebagai waktu efektif
+	// event saat dibandingkan dengan cash_base_as_of.
+	EmailReceivedAt *time.Time `json:"email_received_at,omitempty"`
 }
 
 type GmailCashSyncResponse struct {

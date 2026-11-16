@@ -75,25 +75,28 @@ export default function CashMutationHistory({ cashMutations = [] }: CashMutation
               ) : (
                 pageItems.map((mutation) => {
                   const isDeposit = mutation.type === 'DEPOSIT'
+                  const isDividend = mutation.type === 'DIVIDEND'
+                  const isCredit = isDeposit || isDividend
+                  const badgeClass = isDividend
+                    ? 'bg-teal-100 text-teal-800'
+                    : isDeposit
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : 'bg-rose-100 text-rose-800'
                   return (
                     <tr key={mutation.id} className="hover:bg-slate-50/50 transition">
                       <td className="border-b border-slate-100 p-3 text-center">
                         <div className="flex flex-col items-center gap-1">
                           <div className="flex items-center gap-1.5">
                             <span className="font-semibold text-sm">{mutation.broker_name}</span>
-                            <span
-                              className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-                                isDeposit ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-                              }`}
-                            >
+                            <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${badgeClass}`}>
                               {mutation.type}
                             </span>
                           </div>
                         </div>
                       </td>
                       <td className="border-b border-slate-100 p-2 text-sm text-center font-semibold">
-                        <span className={isDeposit ? 'text-emerald-700' : 'text-rose-700'}>
-                          {isDeposit ? '+' : '-'}{formatCurrency(mutation.amount)}
+                        <span className={isCredit ? 'text-emerald-700' : 'text-rose-700'}>
+                          {isCredit ? '+' : '-'}{formatCurrency(mutation.amount)}
                         </span>
                       </td>
                       <td className="border-b border-slate-100 p-2 text-xs text-center text-slate-600">

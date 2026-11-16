@@ -11,6 +11,8 @@ import { api, getBaseUrl } from '../lib/api'
 import { buildSummary, normalizeArray } from '../lib/portfolio'
 import type {
   Broker,
+  CashBreakdown,
+  CashBreakdownResponse,
   CashMutationData,
   Holding,
   PortfolioSummary,
@@ -59,6 +61,12 @@ interface PortfolioContextValue {
   syncCashMutations: () => Promise<CashMutationsResponse | null>
   loadCashMutations: () => Promise<CashMutationData[]>
   getGmailSyncStatus: () => Promise<GmailSyncStatusResponse | null>
+  getCashBreakdown: (brokerId: number) => Promise<CashBreakdown | null>
+  setBrokerCashBase: (
+    brokerId: number,
+    cashBase: number,
+    cashBaseAsOf: string,
+  ) => Promise<CashBreakdown | null>
 }
 
 const initialState: PortfolioState = {
@@ -404,6 +412,38 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     }
   }, [setStatus])
 
+  // Rincian saldo kas: cash_base + event setelah cutoff = cash.
+  const getCashBreakdown = useCallback(
+    async (brokerId: number): Promise<CashBreakdown | null> => {
+      try {
+        const res = await api<CashBreakdownResponse>(`/cash-breakdown/${brokerId}`)
+        return res.data ?? null
+      } catch (error) {
+        setStatus((error as Error).message, true)
+        return null
+      }
+    },
+    [setStatus],
+  )
+
+  const setBrokerCashBase = useCallback(
+    async (brokerId: number, cashBase: number, cashBaseAsOf: string): Promise<CashBreakdown | null> => {
+      try {
+        const res = await api<CashBreakdownResponse>(`/broker/${brokerId}/cash-base`, {
+          method: 'PUT',
+          body: JSON.stringify({ cash_base: cashBase, cash_base_as_of: cashBaseAsOf }),
+        })
+        setStatus('Saldo dasar disimpan.')
+        await loadDashboard({ silent: true })
+        return res.data ?? null
+      } catch (error) {
+        setStatus((error as Error).message, true)
+        return null
+      }
+    },
+    [setStatus, loadDashboard],
+  )
+
   const value = useMemo<PortfolioContextValue>(
     () => ({
       state,
@@ -424,6 +464,8 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       syncCashMutations,
       loadCashMutations,
       getGmailSyncStatus,
+      getCashBreakdown,
+      setBrokerCashBase,
     }),
     [
       state,
@@ -444,6 +486,8 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       syncCashMutations,
       loadCashMutations,
       getGmailSyncStatus,
+      getCashBreakdown,
+      setBrokerCashBase,
     ],
   )
 

@@ -206,3 +206,69 @@ func (c *BrokersController) TransferCashBetweenBrokers(ctx *gin.Context) {
 		"status":  response.StatusCode,
 	})
 }
+
+// SetCashBase mengatur saldo dasar kas broker (cash = cash_base + event setelah cutoff).
+func (c *BrokersController) SetCashBase(ctx *gin.Context) {
+	userID, err := getUserID(ctx)
+	if err != nil {
+		HandleError(ctx, err)
+		return
+	}
+
+	id, ok := parseBrokerIDParam(ctx)
+	if !ok {
+		return
+	}
+
+	var payload dto.SetCashBaseRequest
+	if err := ctx.ShouldBindJSON(&payload); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	response, err := c.service.Brokers.SetCashBase(userID, id, &payload)
+	if err != nil {
+		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"message": response.Message,
+		"data":    response.Data,
+	})
+}
+
+// GetCashBreakdown mengembalikan rincian saldo kas: dasar + event setelah cutoff.
+func (c *BrokersController) GetCashBreakdown(ctx *gin.Context) {
+	userID, err := getUserID(ctx)
+	if err != nil {
+		HandleError(ctx, err)
+		return
+	}
+
+	id, ok := parseBrokerIDParam(ctx)
+	if !ok {
+		return
+	}
+
+	response, err := c.service.Brokers.GetCashBreakdown(userID, id)
+	if err != nil {
+		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"message": response.Message,
+		"data":    response.Data,
+	})
+}
+
+// parseBrokerIDParam membaca parameter :id sebagai bilangan bulat.
+func parseBrokerIDParam(ctx *gin.Context) (int, bool) {
+	var id int
+	if _, err := fmt.Sscanf(ctx.Param("id"), "%d", &id); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid broker ID"})
+		return 0, false
+	}
+	return id, true
+}

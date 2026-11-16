@@ -468,14 +468,15 @@ func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmai
 			}
 
 			mutationReqs = append(mutationReqs, &models.CashMutation{
-				UserID:      user.Id,
-				BrokerID:    brokerID,
-				BrokerName:  mutation.BrokerName,
-				Type:        models.CashMutationType(mutation.Type),
-				Amount:      mutation.Amount,
-				Date:        date,
-				Description: mutation.Description,
-				RefNo:       mutation.RefNo,
+				UserID:          user.Id,
+				BrokerID:        brokerID,
+				BrokerName:      mutation.BrokerName,
+				Type:            models.CashMutationType(mutation.Type),
+				Amount:          mutation.Amount,
+				Date:            date,
+				EmailReceivedAt: mutation.EmailReceivedAt,
+				Description:     mutation.Description,
+				RefNo:           mutation.RefNo,
 			})
 		}
 
@@ -509,7 +510,7 @@ func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmai
 // Cash mutations are text/HTML body emails, not PDF attachments
 func buildCashMutationQuery(lastSyncAt *time.Time) string {
 	parts := []string{
-		`subject:("deposit" OR "penarikan" OR "withdrawal" OR "top up" OR "mutasi kas")`,
+		`subject:("deposit" OR "penarikan" OR "withdrawal" OR "top up" OR "mutasi kas" OR "pembagian dividen tunai" OR "pembayaran dividen tunai")`,
 	}
 
 	if lastSyncAt != nil {
@@ -615,13 +616,15 @@ func (s *GmailServiceImpl) processCashMessage(ctx context.Context, gmailSrv *gma
 				return fmt.Errorf("parse cash email: %w", err)
 			}
 			if parsed != nil {
+				receivedAt := emailDate
 				mutations = append(mutations, dto.ParsedCashMutation{
-					BrokerName:  parsed.BrokerName,
-					Type:        string(parsed.Type),
-					Amount:      parsed.Amount,
-					Date:        parsed.Date.Format("2006-01-02"),
-					RefNo:       parsed.RefNo,
-					Description: parsed.Description,
+					BrokerName:      parsed.BrokerName,
+					Type:            string(parsed.Type),
+					Amount:          parsed.Amount,
+					Date:            parsed.Date.Format("2006-01-02"),
+					RefNo:           parsed.RefNo,
+					Description:     parsed.Description,
+					EmailReceivedAt: &receivedAt,
 				})
 			}
 		}

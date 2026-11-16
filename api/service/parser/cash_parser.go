@@ -42,6 +42,18 @@ var (
 	// Body patterns:
 	//   "sebesar Rp2.297.040" / "sebesar Rp 2.297.040" / "jumlah Rp 889.654"
 	reJagoWithdrawAmount = regexp.MustCompile(`(?i)(?:sebesar|jumlah|nominal|transfer)\s*(?:<[^>]+>\s*)*Rp\.?\s*([\d.,]+)`)
+
+	// Dividen tunai (Stockbit: "Dividen Bersih\n5,546.51",
+	// Mandiri: "Dividen Bersih (Rp)\t62,700"). Angka boleh berada di dalam
+	// tag HTML, jadi tag (yang boleh berisi digit) dikonsumsi utuh lebih dulu.
+	reDividendNet = regexp.MustCompile(`(?i)dividen\s+bersih(?:\s*\(?\s*rp\s*\)?)?(?:<[^>]*>|[^0-9<]){0,60}([0-9][\d,.]*)`)
+
+	// Tanggal pembayaran dividen: ISO (Stockbit) atau "8 Mei 2026" (Mandiri).
+	reDividendPayDateISO = regexp.MustCompile(`(?i)tanggal\s+pembayaran(?:<[^>]*>|[^0-9<]){0,60}(\d{4}-\d{2}-\d{2})`)
+	reDividendPayDateID  = regexp.MustCompile(`(?i)pada\s+tanggal(?:<[^>]*>|[^0-9<]){0,60}(\d{1,2})\s+(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\s+(\d{4})`)
+
+	// Ticker dari subjek: "(BBRI)" pada subjek Mandiri.
+	reDividendTickerParen = regexp.MustCompile(`\(([A-Za-z]{4})\)`)
 )
 
 func cleanAndParseAmount(raw string) (float64, error) {
@@ -168,5 +180,119 @@ func ParseCashEmail(from, subject string, emailDate time.Time, body string) (*Pa
 		}
 	}
 
+	// 3. Notifikasi dividen tunai (uang masuk ke RDN → kas bertambah)
+	if parsed := parseDividendEmail(from, subject, emailDate, body); parsed != nil {
+		return parsed, nil
+	}
+
 	return nil, nil
+}
+
+// parseDividendEmail menangani notifikasi dividen tunai dari broker:
+//   - Stockbit : subjek "Pembagian dividen tunai BBRI", body "Dividen Bersih 5,546.51"
+//   - Mandiri  : subjek "Pembayaran Dividen Tunai' ... (BBRI)'", body "Dividen Bersih (Rp) 62,700"
+//
+// Mengembalikan nil bila bukan email dividen broker atau gagal dibaca.
+func parseDividendEmail(from, subject string, emailDate time.Time, body string) *ParsedCashMutation {
+	fromLower := strings.ToLower(from)
+	subjectLower := strings.ToLower(subject)
+
+	isStockbit := strings.Contains(fromLower, "stockbit.com") &&
+		strings.HasPrefix(subjectLower, "pembagian dividen tunai")
+	isMandiri := strings.Contains(fromLower, "mandirisekuritas.co.id") &&
+		strings.Contains(subjectLower, "pembayaran dividen tunai")
+	if !isStockbit && !isMandiri {
+		return nil
+	}
+
+	matches := reDividendNet.FindStringSubmatch(body)
+	if len(matches) < 2 {
+		return nil
+	}
+	amount, err := cleanAndParseAmount(matches[1])
+	if err != nil || amount <= 0 {
+		return nil
+	}
+
+	// Tanggal pembayaran; fallback ke tanggal email bila tidak ditemukan.
+	payDate := emailDate
+	if dm := reDividendPayDateISO.FindStringSubmatch(body); len(dm) >= 2 {
+		if t, e := time.Parse("2006-01-02", dm[1]); e == nil {
+			payDate = t
+		}
+	} else if dm := reDividendPayDateID.FindStringSubmatch(body); len(dm) >= 4 {
+		if t, e := time.Parse("2 January 2006", fmt.Sprintf("%s %s %s", dm[1], monthID(dm[2]), dm[3])); e == nil {
+			payDate = t
+		}
+	}
+
+	brokerName := "Stockbit Sekuritas"
+	if isMandiri {
+		brokerName = "Mandiri Sekuritas"
+	}
+
+	ticker := dividendTicker(subject)
+	description := "Dividen Tunai"
+	if ticker != "" {
+		description = "Dividen Tunai " + ticker
+	}
+	refNo := "DIV-" + ticker + "-" + payDate.Format("20060102")
+
+	return &ParsedCashMutation{
+		BrokerName:  brokerName,
+		Type:        models.CashMutationDividend,
+		Amount:      amount,
+		Date:        payDate,
+		RefNo:       refNo,
+		Description: description,
+	}
+}
+
+// dividendTicker mengambil kode saham dari subjek notifikasi dividen:
+// "Pembagian dividen tunai BBRI" → BBRI, "… (BBRI)'" → BBRI.
+func dividendTicker(subject string) string {
+	if m := reDividendTickerParen.FindStringSubmatch(subject); len(m) >= 2 {
+		return strings.ToUpper(m[1])
+	}
+	fields := strings.Fields(subject)
+	if n := len(fields); n > 0 {
+		last := strings.Trim(fields[n-1], "'\"")
+		if len(last) >= 3 && len(last) <= 6 {
+			if _, err := strconv.Atoi(last); err != nil {
+				return strings.ToUpper(last)
+			}
+		}
+	}
+	return ""
+}
+
+// monthID menerjemahkan nama bulan Indonesia ke bahasa Inggris (time.Parse).
+func monthID(month string) string {
+	switch strings.ToLower(month) {
+	case "januari":
+		return "January"
+	case "februari":
+		return "February"
+	case "maret":
+		return "March"
+	case "april":
+		return "April"
+	case "mei":
+		return "May"
+	case "juni":
+		return "June"
+	case "juli":
+		return "July"
+	case "agustus":
+		return "August"
+	case "september":
+		return "September"
+	case "oktober":
+		return "October"
+	case "november":
+		return "November"
+	case "desember":
+		return "December"
+	}
+	return month
 }

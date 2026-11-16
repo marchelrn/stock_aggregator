@@ -50,6 +50,8 @@ type BrokersService interface {
 	DeleteBrokerData(userID uint, brokerName []string) (*dto.BasicResponse, error)
 	UpdateBrokerData(userID uint, id int, payload *dto.BrokerRequest) (*dto.BasicResponse, error)
 	TransferCashBetweenBrokers(userID uint, payload *dto.TransferCashRequest) (*dto.BasicResponse, error)
+	SetCashBase(userID uint, id int, payload *dto.SetCashBaseRequest) (*dto.CashBreakdownResponse, error)
+	GetCashBreakdown(userID uint, id int) (*dto.CashBreakdownResponse, error)
 }
 
 type TransactionService interface {

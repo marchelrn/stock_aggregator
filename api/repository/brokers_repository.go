@@ -91,6 +91,13 @@ func (r *BrokersRepository) UpdateBrokerData(userID uint, id int, payload *model
 		broker.Name = payload.Name
 	}
 	broker.Cash = payload.Cash
+	// Sinkronkan juga saldo dasar bila caller membawanya (penyesuaian
+	// manual seperti transfer/tambah cash harus menggeser cash_base
+	// agar rumus cash = cash_base + event tetap berlaku).
+	if payload.CashBaseAsOf != nil {
+		broker.CashBase = payload.CashBase
+		broker.CashBaseAsOf = payload.CashBaseAsOf
+	}
 
 	if err := r.db.Save(&broker).Error; err != nil {
 		return nil, err

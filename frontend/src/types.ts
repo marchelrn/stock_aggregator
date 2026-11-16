@@ -4,6 +4,35 @@ export interface Broker {
   id: number
   name: string
   cash: number
+  /** Saldo dasar yang di-set manual; cash = cash_base + event setelah cutoff. */
+  cash_base?: number
+  /** Waktu berlakunya saldo dasar (cutoff). null = mode replay penuh. */
+  cash_base_as_of?: string | null
+}
+
+/** Satu baris riwayat yang memengaruhi cash setelah cutoff. */
+export interface CashEvent {
+  source: string // TRADE | MUTATION
+  type: string // BUY/SELL/DEPOSIT/WITHDRAW/DIVIDEND
+  delta: number
+  date: string
+  description: string
+}
+
+export interface CashBreakdown {
+  broker_id: number
+  broker_name: string
+  cash: number
+  cash_base: number
+  cash_base_as_of: string | null
+  events_total: number
+  events: CashEvent[]
+}
+
+export interface CashBreakdownResponse {
+  status_code: number
+  message: string
+  data: CashBreakdown
 }
 
 export interface Holding {
@@ -156,9 +185,10 @@ export interface CashMutationData {
   user_id: number
   broker_id: number
   broker_name: string
-  type: string
+  type: string // DEPOSIT | WITHDRAW | DIVIDEND
   amount: number
   date: string
+  email_received_at?: string | null
   description: string
   ref_no: string
   created_at: string

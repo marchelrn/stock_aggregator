@@ -104,6 +104,8 @@ func SetupRoutes(s *contract.Service) *gin.Engine {
 		protected.PUT("/broker/:id", brokerController.UpdateBrokerData)
 		protected.DELETE("/broker/:name", brokerController.DeleteBrokerData)
 		protected.POST("/broker/transfer-cash", brokerController.TransferCashBetweenBrokers)
+		protected.PUT("/broker/:id/cash-base", brokerController.SetCashBase)
+		protected.GET("/cash-breakdown/:id", brokerController.GetCashBreakdown)
 
 		// Transaction routes
 		protected.GET("/transaction/:id", transactionController.GetTransaction)  // Get a specific transaction by ID

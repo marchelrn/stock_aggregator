@@ -9,6 +9,7 @@ import HoldingTable from '../components/HoldingTable'
 import TransactionHistory from '../components/TransactionHistory'
 import StockPrices from '../components/StockPrices'
 import CashMutationHistory from '../components/CashMutationHistory'
+import CashBasePanel from '../components/CashBasePanel'
 
 interface TradeModalState {
   open: boolean
@@ -325,6 +326,9 @@ export default function BrokersPage() {
           />
         </section>
 
+        {/* Atur Saldo Kas (cash_base manual + event setelah cutoff) */}
+        <CashBasePanel brokers={state.brokers} />
+
         {/* Gmail Sync Section */}
         <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
           <div className="flex items-center justify-between gap-2">
@@ -389,7 +393,7 @@ export default function BrokersPage() {
 
         <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-xl font-semibold">Riwayat Deposit & Penarikan</h2>
+            <h2 className="text-xl font-semibold">Riwayat Deposit, Penarikan & Dividen</h2>
             <span className="text-xs text-slate-500">{cashMutations.length} transaksi</span>
           </div>
           <CashMutationHistory cashMutations={cashMutations} />
