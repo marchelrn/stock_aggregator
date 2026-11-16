@@ -24,7 +24,7 @@ export default function LoginPage() {
         navigate(setupCompleted ? '/' : '/setup', { replace: true })
       })
       .catch(() => {
-        // Token kadaluarsa atau tidak valid — hapus dan tampilkan form login.
+        // Token kadaluarsa atau tidak valid, hapus dan tampilkan form login.
         clearSession()
         setChecking(false)
       })

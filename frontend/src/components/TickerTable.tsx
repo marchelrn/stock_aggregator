@@ -54,14 +54,14 @@ export default function TickerTable({ summary }: TickerTableProps) {
       <table className="w-full min-w-[760px] border-collapse">
         <thead>
           <tr className="bg-slate-50 text-slate-500">
-            <th className="border-b border-slate-300 p-2 text-left text-xs">Ticker</th>
-            <th className="border-b border-slate-300 p-2 text-left text-xs">Total Lot</th>
-            <th className="border-b border-slate-300 p-2 text-left text-xs">Avg Price</th>
-            <th className="border-b border-slate-300 p-2 text-left text-xs">Current Price</th>
-            <th className="border-b border-slate-300 p-2 text-left text-xs">Market Value</th>
-            <th className="border-b border-slate-300 p-2 text-left text-xs">P/L</th>
-            <th className="border-b border-slate-300 p-2 text-left text-xs">P/L %</th>
-            <th className="border-b border-slate-300 p-2 text-left text-xs">Weight</th>
+            <th className="border-b border-slate-300 p-2 text-center text-xs">Ticker</th>
+            <th className="border-b border-slate-300 p-2 text-right text-xs">Total Lot</th>
+            <th className="border-b border-slate-300 p-2 text-right text-xs">Avg Price</th>
+            <th className="border-b border-slate-300 p-2 text-right text-xs">Current Price</th>
+            <th className="border-b border-slate-300 p-2 text-right text-xs">Market Value</th>
+            <th className="border-b border-slate-300 p-2 text-right text-xs">P/L</th>
+            <th className="border-b border-slate-300 p-2 text-right text-xs">P/L %</th>
+            <th className="border-b border-slate-300 p-2 text-right text-xs">Weight</th>
           </tr>
         </thead>
         <tbody>
@@ -74,26 +74,28 @@ export default function TickerTable({ summary }: TickerTableProps) {
           ) : (
             sortedRows.map((row) => (
               <tr key={row.ticker}>
-                <td className="border-b border-slate-100 p-2 text-sm font-semibold">{row.ticker}</td>
-                <td className="border-b border-slate-100 p-2 text-sm">
+                <td className="border-b border-slate-100 p-2 text-sm text-center font-semibold">
+                  {row.ticker}
+                </td>
+                <td className="border-b border-slate-100 p-2 text-sm text-right">
                   {formatNumber(row.total_lot, 0)}
                 </td>
-                <td className="border-b border-slate-100 p-2 text-sm">
+                <td className="border-b border-slate-100 p-2 text-sm text-right">
                   {formatCurrency(row.avg_price)}
                 </td>
-                <td className="border-b border-slate-100 p-2 text-sm">
+                <td className="border-b border-slate-100 p-2 text-sm text-right">
                   {formatCurrency(getCurrentPrice(row))}
                 </td>
-                <td className="border-b border-slate-100 p-2 text-sm">
+                <td className="border-b border-slate-100 p-2 text-sm text-right">
                   {formatCurrency(getMarketValue(row))}
                 </td>
-                <td className={`border-b border-slate-100 text-sm ${plClass(getProfitLoss(row))}`}>
+                <td className={`border-b border-slate-100 text-sm text-right ${plClass(getProfitLoss(row))}`}>
                   {formatCurrency(getProfitLoss(row))}
                 </td>
-                <td className={`border-b border-slate-100 p-2 text-sm ${plClass(getProfitPct(row))}`}>
+                <td className={`border-b border-slate-100 p-2 text-sm text-right ${plClass(getProfitPct(row))}`}>
                   {formatPercent(getProfitPct(row))}
                 </td>
-                <td className="border-b border-slate-100 p-2 text-sm">
+                <td className="border-b border-slate-100 p-2 text-sm text-right">
                   {formatPercent(getWeight(row))}
                 </td>
               </tr>

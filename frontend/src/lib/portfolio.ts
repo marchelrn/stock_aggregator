@@ -1,4 +1,4 @@
-// Pure portfolio aggregation helpers — ported from the original usePortfolio composable.
+// Pure portfolio aggregation helpers, ported from the original usePortfolio composable.
 import type {
   Broker,
   BrokerSummary,

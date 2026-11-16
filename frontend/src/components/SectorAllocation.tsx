@@ -57,7 +57,7 @@ export default function SectorAllocation({ holdings = [], tickerSummaries = [] }
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={sec.weight}
-            aria-valuetext={`${formatNumber(sec.weight, 1)}% — ${formatCurrency(sec.value)}`}
+            aria-valuetext={`${formatNumber(sec.weight, 1)}%, ${formatCurrency(sec.value)}`}
             className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"
           >
             <div

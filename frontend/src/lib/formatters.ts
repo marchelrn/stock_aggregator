@@ -1,10 +1,9 @@
-// Formatting helpers — port of the original useFormatters composable.
+// Formatting helpers, port of the original useFormatters composable.
 
 export function formatCurrency(value: number | string | null | undefined): string {
   const num = Number(value || 0)
   return new Intl.NumberFormat('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
+    style: 'decimal',
     maximumFractionDigits: 2,
   }).format(num)
 }

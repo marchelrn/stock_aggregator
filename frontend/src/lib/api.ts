@@ -1,4 +1,4 @@
-// API client — port of the original useApi composable.
+// API client, port of the original useApi composable.
 // baseUrl is a module-level value so it is shared across the whole app,
 // mirroring the singleton `ref` used in the Vue version.
 

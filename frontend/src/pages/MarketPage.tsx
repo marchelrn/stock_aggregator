@@ -10,8 +10,8 @@ import type { Holding, MarketDetail, StockPriceMap } from '../types'
 
 const REFRESH_INTERVAL = 5 * 60 * 1000
 const panelClass = 'rounded-2xl border border-slate-300 bg-white p-4 shadow-sm'
-const money = (value: number | null | undefined) => value == null ? '—' : formatCurrency(value)
-const number = (value: number | null | undefined) => value == null ? '—' : formatNumber(value, 0)
+const money = (value: number | null | undefined) => value == null ? '-' : formatCurrency(value)
+const number = (value: number | null | undefined) => value == null ? '-' : formatNumber(value, 0)
 
 function Movers({ title, rows }: { title: string; rows: WatchlistRow[] }) {
   return (
@@ -207,12 +207,12 @@ export default function MarketPage() {
               {visibleRows.map((row) => (
                 <tr key={row.ticker} className={row.ticker === selected ? 'bg-teal-50' : 'hover:bg-slate-50'}>
                   <td className="border-b border-slate-100 p-3"><button type="button" aria-pressed={row.ticker === selected} onClick={() => setSelected(row.ticker)} className="font-semibold text-teal-800 underline decoration-dotted underline-offset-4">{row.ticker}</button></td>
-                  <td className="border-b border-slate-100 p-3 text-xs text-slate-600">{row.sector || '—'}</td>
+                  <td className="border-b border-slate-100 p-3 text-xs text-slate-600">{row.sector || '-'}</td>
                   <td className="border-b border-slate-100 p-3" title={`Cache harga: ${marketTime(row.quote?.updated_at)}`}>{money(row.quote?.price)}</td>
-                  <td className={`border-b border-slate-100 p-3 ${row.quote ? plClass(row.quote.change_percent) : 'text-slate-500'}`}>{row.quote ? `${formatNumber(row.quote.change)} (${formatPercent(row.quote.change_percent)})` : '—'}</td>
+                  <td className={`border-b border-slate-100 p-3 ${row.quote ? plClass(row.quote.change_percent) : 'text-slate-500'}`}>{row.quote ? `${formatNumber(row.quote.change)} (${formatPercent(row.quote.change_percent)})` : '-'}</td>
                   <td className="border-b border-slate-100 p-3">{money(row.quote?.previous_close)}</td>
                   <td className="border-b border-slate-100 p-3">{formatNumber(row.lot, 0)}</td>
-                  <td className="border-b border-slate-100 p-3 text-xs text-slate-600">{row.brokers.join(', ') || '—'}</td>
+                  <td className="border-b border-slate-100 p-3 text-xs text-slate-600">{row.brokers.join(', ') || '-'}</td>
                 </tr>
               ))}
               {visibleRows.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-slate-500">
@@ -229,7 +229,7 @@ export default function MarketPage() {
         {detailError && <p role="alert" className="mt-4 text-sm text-rose-700">{detailError} Gunakan Refresh untuk mencoba lagi.</p>}
         {detail && <>
           <p className="mt-1 text-sm text-slate-500">{detail.name || selected} · {selectedRow?.sector ? `${selectedRow.sector} · ` : ''}{detail.exchange || 'Bursa tidak tersedia'} · {detail.currency || 'Mata uang tidak tersedia'}</p>
-          <p className="mt-3 text-2xl font-bold">{money(detail.price)} <span className={`text-sm ${detail.change_percent == null ? 'text-slate-500' : plClass(detail.change_percent)}`}>{detail.change_percent == null ? '—' : formatPercent(detail.change_percent)}</span></p>
+          <p className="mt-3 text-2xl font-bold">{money(detail.price)} <span className={`text-sm ${detail.change_percent == null ? 'text-slate-500' : plClass(detail.change_percent)}`}>{detail.change_percent == null ? '-' : formatPercent(detail.change_percent)}</span></p>
           {/*<p className="mt-1 text-xs text-slate-500">Waktu harga Yahoo: {marketTime(detail.market_time)} · Diambil server: {marketTime(detail.fetched_at)}</p>*/}
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {[

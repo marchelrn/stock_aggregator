@@ -29,6 +29,7 @@ func getMigrations() []migration {
 		getDropUniqueRefNoIndex(),
 		getCreateTableCashMutations(),
 		getAddCashBaseToBrokers(),
+		getAddTrimegahTemplate(),
 	}
 }
 

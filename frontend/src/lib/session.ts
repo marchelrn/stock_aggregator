@@ -14,7 +14,7 @@ export function clearSession(): void {
   SESSION_KEYS.forEach((key) => localStorage.removeItem(key))
 }
 
-/** Cek exp pada payload JWT (tanpa verifikasi signature — itu tugas server). */
+/** Cek exp pada payload JWT (tanpa verifikasi signature, itu tugas server). */
 export function isTokenExpired(token: string): boolean {
   try {
     const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')

@@ -39,7 +39,7 @@ export default function BrokerCards({ summary }: BrokerCardsProps) {
 
             <section
               className="min-w-0 border-t border-slate-200 pt-3 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0"
-              aria-label={`Sector Distribution — ${broker.name}`}
+              aria-label={`Sector Distribution: ${broker.name}`}
             >
               <h4 className="text-xs font-semibold text-slate-700">Sector Distribution</h4>
               {broker.sectors.length === 0 ? (
@@ -60,7 +60,7 @@ export default function BrokerCards({ summary }: BrokerCardsProps) {
                         aria-valuemin={0}
                         aria-valuemax={100}
                         aria-valuenow={sector.weight}
-                        aria-valuetext={`${formatNumber(sector.weight, 1)}% — ${formatCurrency(sector.value)}`}
+                        aria-valuetext={`${formatNumber(sector.weight, 1)}%, ${formatCurrency(sector.value)}`}
                         className="h-2 overflow-hidden rounded-full bg-slate-100"
                       >
                         <div

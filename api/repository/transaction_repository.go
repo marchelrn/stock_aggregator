@@ -244,7 +244,7 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 	// same row can appear twice in one batch. Two keys are used:
 	//   - (ref, ticker, type, lot, price): one confirmation can carry several
 	//     fills sharing a Ref# (partial executions), but the same fill may also
-	//     arrive in documents with different timestamps/dates — RefNo with the
+	//     arrive in documents with different timestamps/dates. RefNo with the
 	//     fill details identifies it either way.
 	//   - (ticker, type, lot, price, date, broker): catches copies with empty
 	//     or differing RefNos (e.g. daily TC vs per-trade email).

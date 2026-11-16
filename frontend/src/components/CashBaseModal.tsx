@@ -180,7 +180,7 @@ export default function CashBaseModal({ broker, onClose }: CashBaseModalProps) {
 
             {!baseActive && (
               <p className="mt-2 text-xs text-amber-700">
-                Belum ada saldo dasar — cash masih dihitung dari replay seluruh riwayat.
+                Belum ada saldo dasar. Cash masih dihitung dari replay seluruh riwayat.
               </p>
             )}
 
