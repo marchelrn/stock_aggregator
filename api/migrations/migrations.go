@@ -32,6 +32,7 @@ func getMigrations() []migration {
 		getAddTrimegahTemplate(),
 		getCreateProcessedGmailMessagesTable(),
 		getDisableLegacyTrimegahDiscoveryTemplate(),
+		getAnchorCashToRegistration(),
 	}
 }
 

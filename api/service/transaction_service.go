@@ -182,7 +182,7 @@ func (s *TransactionService) CreateTransaction(userID uint, ticker []string, pay
 			return nil, errs.NotFound("broker or stock not found")
 		}
 		msg := strings.ToLower(err.Error())
-		if strings.Contains(msg, "insufficient lot") || strings.Contains(msg, "cannot sell unknown stock") {
+		if strings.Contains(msg, "insufficient lot") || strings.Contains(msg, "cannot sell unknown stock") || strings.Contains(msg, "insufficient broker cash") {
 			return nil, errs.BadRequest(err.Error())
 		}
 		return nil, err

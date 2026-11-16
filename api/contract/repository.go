@@ -61,6 +61,7 @@ type BrokerRepository interface {
 	GetAllBrokers(userID uint) ([]models.Broker, error)
 	GetBrokerByName(userID uint, name string) (*models.Broker, error)
 	UpdateBrokerData(userID uint, id int, payload *models.Broker) (*models.Broker, error)
+	TransferCash(userID uint, fromID, toID int, amount float64) error
 	SetCashBase(userID uint, id int, cashBase float64, asOf time.Time) (*models.Broker, error)
 	GetCashBreakdown(userID uint, id int) (*dto.CashBreakdown, error)
 }

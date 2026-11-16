@@ -449,15 +449,16 @@ func (s *GmailServiceImpl) SyncCashMutationsContext(ctx context.Context, userID 
 }
 
 func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmail.Service, user *models.Users) (*dto.GmailCashSyncResponse, error) {
-	// Cash mutation emails are scanned from the beginning on every run.
-	// They are few, SyncCashMutationBatch deduplicates them, and the shared
-	// trade checkpoint (LastGmailSyncAt) must not hide historical deposits:
-	// after a full trade sync the checkpoint is "now", which would make the
-	// deposit sync report "no new emails" forever.
+	if user.CreatedAt.IsZero() {
+		return nil, fmt.Errorf("user registration time is required for cash sync")
+	}
+	// Cash history is not imported. Keep this independent of the trade
+	// checkpoint and use epoch seconds rather than Gmail's day-only cutoff.
 	query, err := s.cashMutationQuery(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
+	query += fmt.Sprintf(" after:%d", user.CreatedAt.Unix())
 	var allMutations []dto.ParsedCashMutation
 	var emailCount int
 	pageToken := ""
@@ -478,7 +479,15 @@ func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmai
 			if err != nil {
 				return nil, fmt.Errorf("process Gmail message %s: %w", msg.Id, err)
 			}
-			allMutations = append(allMutations, mutations...)
+			for _, mutation := range mutations {
+				date, err := time.Parse("2006-01-02", mutation.Date)
+				if err != nil {
+					return nil, fmt.Errorf("invalid cash mutation date %q: %w", mutation.Date, err)
+				}
+				if date.After(user.CreatedAt) {
+					allMutations = append(allMutations, mutation)
+				}
+			}
 			emailCount++
 		}
 		pageToken = messages.NextPageToken
@@ -504,9 +513,9 @@ func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmai
 				}
 			}
 
-			date, _ := time.Parse("2006-01-02", mutation.Date)
-			if date.IsZero() {
-				date = time.Now()
+			date, err := time.Parse("2006-01-02", mutation.Date)
+			if err != nil {
+				return nil, fmt.Errorf("invalid cash mutation date %q: %w", mutation.Date, err)
 			}
 
 			mutationReqs = append(mutationReqs, &models.CashMutation{
@@ -524,7 +533,7 @@ func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmai
 
 		synced, err := s.CashMutationRepo.SyncCashMutationBatch(user.Id, mutationReqs)
 		if err != nil {
-			log.Printf("Failed to sync cash mutation batch: %v", err)
+			return nil, fmt.Errorf("sync cash mutation batch: %w", err)
 		}
 		syncedCount = synced
 	}
@@ -534,7 +543,7 @@ func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmai
 	// emails that arrived since the last trade sync.
 
 	message := fmt.Sprintf("Berhasil parse %d mutasi kas dari %d email, disimpan %d mutasi", len(allMutations), emailCount, syncedCount)
-	if s.TransactionRepo == nil {
+	if s.CashMutationRepo == nil {
 		message = fmt.Sprintf("Berhasil parse %d mutasi kas dari %d email; belum disimpan", len(allMutations), emailCount)
 	} else if emailCount == 0 {
 		message = "Tidak ada email mutasi kas baru ditemukan"

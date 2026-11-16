@@ -207,7 +207,7 @@ func (c *BrokersController) TransferCashBetweenBrokers(ctx *gin.Context) {
 	})
 }
 
-// SetCashBase mengatur saldo dasar kas broker (cash = cash_base + event setelah cutoff).
+// SetCashBase sets the current cash balance using the server's timestamp.
 func (c *BrokersController) SetCashBase(ctx *gin.Context) {
 	userID, err := getUserID(ctx)
 	if err != nil {

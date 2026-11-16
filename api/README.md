@@ -76,6 +76,36 @@ DB_NAME=stock_api
 | `DELETE` | `/broker/:name` | Delete broker (supports comma-separated) |
 | `POST` | `/broker/transfer-cash` | Transfer cash between brokers |
 
+### Cash balance rules and cutover
+
+Cash is a manually initialized balance, not the result of replaying imported history.
+
+- Creating a broker with `cash` initializes both `cash` and `cash_base` to that amount, with `cash_base_as_of = users.created_at`. Brokers discovered by imports start at zero with the same registration cutoff.
+- A trade or cash mutation changes cash only when its **event date is strictly after** `max(users.created_at, brokers.cash_base_as_of)`. Equality is history-only. Missing broker cutoff falls back to registration, never all history; a missing registration timestamp fails closed.
+- Historical BUY/SELL imports still populate transactions and holdings, but never credit/debit cash. A historical manual BUY also bypasses the insufficient-cash check. Eligible manual BUYs still require enough cash; confirmed imported trades record their actual delta even if the resulting balance is negative.
+- Cash-email sync searches only after registration (Gmail epoch-second `after:`), independently of the trade checkpoint, and filters out parsed mutations dated at/before registration. The repository skips mutation imports at/before the effective broker cutoff altogether; existing historical mutation rows are not deleted. Deposits, withdrawals, and dividends follow the mutation's `date`, not `email_received_at`, fetch time, or import time. A late email cannot make an old event affect cash. Date-only events remain midnight at the supplied date; no intraday time is invented, so events dated the registration/reset day may be excluded by that day's timestamp cutoff.
+- Imported trades/mutations without a valid event date are rejected, not assigned today's date. An undated **manual** transaction still defaults to server now.
+- Repeated imports do not apply cash twice. Duplicate trade timestamp enrichment is skipped if it would move an already-recorded trade across the cash cutoff.
+- Manual additions and transfers adjust both stored cash and the baseline, without generating duplicate cash-mutation rows. Transfers are atomic, user-scoped, lock both brokers in ID order, require distinct brokers and a positive amount, and enforce source funds. Deleting a trade reverses its cash delta only if that trade is eligible under the current cutoff.
+
+**Set current cash**: `PUT /broker/:id/cash-base`, authenticated, now takes only:
+
+```json
+{"cash_base": 1500000}
+```
+
+`cash_base` is the **current balance**, not a historical starting balance. Zero is supported; negative/nonfinite balances are rejected. The server sets `cash = cash_base` exactly and records the cutoff at server time while holding the broker lock (never earlier than registration). No existing events are added during the reset. A late import dated before that reset cannot change it.
+
+The legacy `cash_base_as_of` request field remains optional and accepted, but its value is ignored/clamped to server now, whether in the past or future. Clients should omit it. The response envelope stays `{ "message": "...", "data": ... }`, including `cash`, `cash_base`, `cash_base_as_of`, `events_total`, and `events`. `GET /cash-breakdown/:id` retains the same breakdown fields and uses the same event eligibility as cash updates/recalculation. The timestamp/events are backend accounting metadata, not a date-selection requirement for Set Cash.
+
+Existing `PUT /broker/:id` remains an **addition** of the submitted `cash`, not a current-balance replacement. Use the cash-base endpoint for replacement. The internal repository's `UpdateBrokerData` now also takes a cash delta; it must not be passed an absolute balance.
+
+**Deployment / old data:** the forward migration `anchor_cash_to_registration` follows the existing migrations; no applied migration is rewritten. It leaves every stored `brokers.cash` unchanged, raises missing/early cutoffs to registration, retains later cutoffs, and derives `cash_base = stored cash - eligible already-stored event deltas` using event dates. This aligns breakdown/recalculation with stored cash without replaying historical money. It is intentionally not reversed by Down. Run the migration with old application writers stopped before enabling the new code; back up broker balances and baseline metadata first. Existing `NUMERIC(14,2)` baseline precision is unchanged.
+
+**This does not repair or certify old cash balances.** Previously replayed historical trades/mutations, duplicate cash, or email-time effects may already have contaminated them. A derived legacy baseline may be negative and is not asserted to be the user's original manual balance. Users must enter their verified current broker balance through Set Cash to correct it; history/holdings need not be deleted or reimported. Brokers without a matching user/registration timestamp are not assigned invented cutoffs by the migration and need data review. Runtime fallback for missing/early baseline metadata similarly preserves stored cash, subtracting already-recorded eligible deltas to derive baseline metadata before applying new events; read-only breakdown does not persist that normalization.
+
+Repository/migration regressions use SQLite in memory only (`gorm.io/driver/sqlite`, requiring CGO for tests); production remains PostgreSQL. No live database/Gmail is required by these tests. SQLite does not validate PostgreSQL row-lock/concurrency behavior or production numeric rounding.
+
 ### Market data (Yahoo Finance)
 
 `GET /api/market/:ticker` requires `Authorization: Bearer <JWT>` through the existing `/api` authentication middleware. Lowercase tickers are uppercased; the resulting ticker must match `[A-Z0-9]{1,12}` without `.JK` or surrounding whitespace.

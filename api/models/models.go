@@ -4,12 +4,12 @@ import "time"
 
 // Brokers
 type Broker struct {
-	ID        int       `json:"id"`
-	UserID    uint      `json:"user_id" gorm:"column:user_id;index"`
-	Name      string    `json:"name"`
-	Cash      float64   `json:"cash"`
+	ID     int     `json:"id"`
+	UserID uint    `json:"user_id" gorm:"column:user_id;index"`
+	Name   string  `json:"name"`
+	Cash   float64 `json:"cash"`
 	// CashBase adalah saldo dasar yang di-set manual oleh user.
-	// Selama CashBaseAsOf != nil, cash = CashBase + SUM(delta event setelah cutoff).
+	// Cash events count only after max(Users.CreatedAt, CashBaseAsOf).
 	CashBase     float64    `json:"cash_base"`
 	CashBaseAsOf *time.Time `json:"cash_base_as_of"`
 	CreatedAt    time.Time  `json:"created_at"`
@@ -67,8 +67,7 @@ type CashMutation struct {
 	Type       CashMutationType `json:"type" gorm:"column:type"`
 	Amount     float64          `json:"amount" gorm:"column:amount"`
 	Date       time.Time        `json:"date" gorm:"column:date"`
-	// EmailReceivedAt adalah waktu email masuk dari broker; dipakai sebagai
-	// waktu efektif event saat membandingkan dengan cash_base_as_of.
+	// EmailReceivedAt is import metadata only; Date controls cash eligibility.
 	EmailReceivedAt *time.Time `json:"email_received_at" gorm:"column:email_received_at"`
 	Description     string     `json:"description" gorm:"column:description"`
 	RefNo           string     `json:"ref_no" gorm:"column:ref_no"`

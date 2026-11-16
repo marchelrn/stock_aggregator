@@ -72,11 +72,11 @@ type Broker struct {
 }
 
 type BrokerDetails struct {
-	Id           int        `json:"id"`
-	Name         string     `json:"name"`
-	Cash         float64    `json:"cash"`
-	CashBase     float64    `json:"cash_base"`
-	CashBaseAsOf *time.Time `json:"cash_base_as_of"`
+	Id           int          `json:"id"`
+	Name         string       `json:"name"`
+	Cash         float64      `json:"cash"`
+	CashBase     float64      `json:"cash_base"`
+	CashBaseAsOf *time.Time   `json:"cash_base_as_of"`
 	StocksData   []StocksData `json:"stocks_data"`
 	StocksCount  int          `json:"stocks_count"`
 }
@@ -94,11 +94,10 @@ type TransferCashRequest struct {
 	Amount       float64 `json:"amount"`
 }
 
-// SetCashBaseRequest mengatur saldo dasar kas sebuah broker.
-// cash = cash_base + SUM(delta event setelah cash_base_as_of).
+// SetCashBaseRequest sets the current balance, effective at server time.
 type SetCashBaseRequest struct {
 	CashBase float64 `json:"cash_base"`
-	// CashBaseAsOf titik waktu saldo dasar berlaku; kosong = sekarang.
+	// Deprecated: accepted for compatibility but clamped to server now.
 	CashBaseAsOf *time.Time `json:"cash_base_as_of"`
 }
 
@@ -247,23 +246,22 @@ type GmailSyncStatusResponse struct {
 }
 
 type ParsedCashMutation struct {
-	BrokerName string  `json:"broker_name"`
-	Type       string  `json:"type"` // DEPOSIT, WITHDRAW, or DIVIDEND
-	Amount     float64 `json:"amount"`
-	Date       string  `json:"date"`
-	RefNo      string  `json:"ref_no,omitempty"`
+	BrokerName  string  `json:"broker_name"`
+	Type        string  `json:"type"` // DEPOSIT, WITHDRAW, or DIVIDEND
+	Amount      float64 `json:"amount"`
+	Date        string  `json:"date"`
+	RefNo       string  `json:"ref_no,omitempty"`
 	Description string  `json:"description,omitempty"`
-	// EmailReceivedAt waktu email diterima; dipakai sebagai waktu efektif
-	// event saat dibandingkan dengan cash_base_as_of.
+	// EmailReceivedAt is receipt metadata only; Date controls cash eligibility.
 	EmailReceivedAt *time.Time `json:"email_received_at,omitempty"`
 }
 
 type GmailCashSyncResponse struct {
-	StatusCode       int                 `json:"status_code"`
-	Message          string              `json:"message"`
-	MutationsFound   int                 `json:"mutations_found"`
-	MutationsSynced  int                 `json:"mutations_synced"`
-	ParsedMutations  []ParsedCashMutation `json:"parsed_mutations"`
+	StatusCode      int                  `json:"status_code"`
+	Message         string               `json:"message"`
+	MutationsFound  int                  `json:"mutations_found"`
+	MutationsSynced int                  `json:"mutations_synced"`
+	ParsedMutations []ParsedCashMutation `json:"parsed_mutations"`
 }
 
 type CashMutationItem struct {

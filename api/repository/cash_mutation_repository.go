@@ -2,6 +2,8 @@ package repository
 
 import (
 	"errors"
+	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -33,92 +35,82 @@ func (r *CashMutationRepository) SyncCashMutationBatch(userID uint, mutations []
 	}
 
 	syncedCount := 0
-
-	for _, item := range mutations {
-		item.UserID = userID
-		if item.Date.IsZero() {
-			item.Date = time.Now()
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		registered, err := registrationTime(tx, userID)
+		if err != nil {
+			return err
 		}
+		for _, item := range mutations {
+			if item == nil || item.Date.IsZero() {
+				return fmt.Errorf("cash mutation date is required for cash eligibility")
+			}
+			item.UserID = userID
+			if !item.Date.After(registered) {
+				continue
+			}
+			if item.Amount <= 0 || math.IsNaN(item.Amount) || math.IsInf(item.Amount, 0) || MutationCashDelta(item) == 0 {
+				return fmt.Errorf("cash mutation requires a supported type and a positive finite amount")
+			}
 
-		// Resolve broker
-		if item.BrokerID == 0 && item.BrokerName != "" {
-			var b models.Broker
-			if err := r.db.Where("user_id = ? AND LOWER(name) = LOWER(?)", userID, strings.TrimSpace(item.BrokerName)).First(&b).Error; err == nil {
-				item.BrokerID = b.ID
-			} else if errors.Is(err, gorm.ErrRecordNotFound) {
-				newBroker := models.Broker{
-					UserID: userID,
-					Name:   strings.TrimSpace(item.BrokerName),
-					Cash:   0,
+			if item.BrokerID == 0 && item.BrokerName != "" {
+				var broker models.Broker
+				err := tx.Where("user_id = ? AND LOWER(name) = LOWER(?)", userID, strings.TrimSpace(item.BrokerName)).First(&broker).Error
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					broker = models.Broker{UserID: userID, Name: strings.TrimSpace(item.BrokerName)}
+					_, err = ImplBrokersRepository(tx).AddBrokerData(&broker)
 				}
-				if createErr := r.db.Create(&newBroker).Error; createErr == nil {
-					item.BrokerID = newBroker.ID
+				if err != nil {
+					return err
+				}
+				item.BrokerID = broker.ID
+			}
+
+			// Serialize deduplication with the balance update, including retries.
+			var broker models.Broker
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND id = ?", userID, item.BrokerID).First(&broker).Error; err != nil {
+				return err
+			}
+			if err := prepareCashBaseline(tx, userID, &broker); err != nil {
+				return err
+			}
+			if !CountsAfterCutoff(CashEventTime(item), broker.CashBaseAsOf) {
+				continue
+			}
+
+			var existing models.CashMutation
+			if item.RefNo != "" {
+				err := tx.Where("user_id = ? AND broker_id = ? AND ref_no = ?", userID, item.BrokerID, item.RefNo).First(&existing).Error
+				if err == nil {
+					continue
+				}
+				if !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
 				}
 			}
-		}
 
-		// Check duplicate
-		var existing models.CashMutation
-		var isDuplicate bool
-
-		if item.RefNo != "" {
-			err := r.db.Where("user_id = ? AND broker_id = ? AND ref_no = ?", userID, item.BrokerID, item.RefNo).First(&existing).Error
+			start := time.Date(item.Date.Year(), item.Date.Month(), item.Date.Day(), 0, 0, 0, 0, item.Date.Location())
+			err := tx.Where("user_id = ? AND broker_id = ? AND type = ? AND amount = ? AND date >= ? AND date < ?",
+				userID, item.BrokerID, item.Type, item.Amount, start, start.AddDate(0, 0, 1)).First(&existing).Error
 			if err == nil {
-				isDuplicate = true
+				continue
 			}
-		}
-
-		if !isDuplicate {
-			// Check by user, broker, type, amount, and date (same day)
-			startOfDay := time.Date(item.Date.Year(), item.Date.Month(), item.Date.Day(), 0, 0, 0, 0, item.Date.Location())
-			endOfDay := startOfDay.Add(24 * time.Hour)
-			err := r.db.Where("user_id = ? AND broker_id = ? AND type = ? AND amount = ? AND date >= ? AND date < ?",
-				userID, item.BrokerID, item.Type, item.Amount, startOfDay, endOfDay).First(&existing).Error
-			if err == nil {
-				isDuplicate = true
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
 			}
-		}
 
-		if isDuplicate {
-			continue
-		}
-
-		// Insert mutation and update broker balance in a single transaction
-		txErr := r.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Create(item).Error; err != nil {
 				return err
 			}
-
-			cashDiff := MutationCashDelta(item)
-			if cashDiff == 0 || item.BrokerID <= 0 {
-				return nil
-			}
-
-			var broker models.Broker
-			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-				Where("user_id = ? AND id = ?", userID, item.BrokerID).
-				First(&broker).Error
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return nil
-			}
-			if err != nil {
+			broker.Cash += MutationCashDelta(item)
+			if err := tx.Save(&broker).Error; err != nil {
 				return err
 			}
-
-			// Mode cash-base: mutasi sebelum cutoff sudah termasuk di saldo
-			// dasar, jadi tidak boleh mengubah cash lagi.
-			if !CountsAfterCutoff(CashEventTime(item), broker.CashBaseAsOf) {
-				return nil
-			}
-
-			broker.Cash += cashDiff
-			return tx.Save(&broker).Error
-		})
-
-		if txErr == nil {
 			syncedCount++
 		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
 	}
-
 	return syncedCount, nil
 }

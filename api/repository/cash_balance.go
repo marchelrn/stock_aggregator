@@ -2,27 +2,22 @@ package repository
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
 	"github.com/marchelrn/stock_api/dto"
 	"github.com/marchelrn/stock_api/models"
+	errs "github.com/marchelrn/stock_api/pkg/error"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-// Model saldo kas:
-//
-//	cash = cash_base + SUM(delta event setelah cash_base_as_of)
-//
-// cash_base di-set manual oleh user (lihat SetCashBase). Selama
-// cash_base_as_of masih NULL, broker berada di mode lama: setiap event
-// langsung mengubah cash (perilaku replay historis seperti sebelumnya).
+// Cash starts from a manually supplied balance; history before registration
+// or the latest current-balance reset must never be replayed into it.
 
 // TradeCashDelta menghitung pengaruh kas dari satu isi transaksi:
 // BUY = -(gross + tax), SELL = gross - tax.
-// Rumusnya identik dengan yang dipakai CalculateHoldingAfterBatch,
-// sehingga mode lama (tanpa cutoff) menghasilkan angka yang sama.
 func TradeCashDelta(t *models.Transaction) float64 {
 	gross := float64(t.Lot) * 100 * t.Price
 	tax := t.Tax
@@ -50,20 +45,16 @@ func MutationCashDelta(m *models.CashMutation) float64 {
 	return 0
 }
 
-// CashEventTime adalah waktu efektif sebuah mutasi kas: waktu email
-// diterima dari broker bila tersedia, jika tidak pakai tanggal mutasi.
+// Email receipt is import metadata, not the time money moved.
 func CashEventTime(m *models.CashMutation) time.Time {
-	if m.EmailReceivedAt != nil {
-		return *m.EmailReceivedAt
-	}
 	return m.Date
 }
 
 // CountsAfterCutoff menentukan apakah sebuah event ikut mengubah cash.
-// asOf NULL = mode lama, semua event diterapkan.
+// A missing cutoff fails closed; callers must resolve the registration floor.
 func CountsAfterCutoff(eventTime time.Time, asOf *time.Time) bool {
-	if asOf == nil {
-		return true
+	if asOf == nil || asOf.IsZero() || eventTime.IsZero() {
+		return false
 	}
 	return eventTime.After(*asOf)
 }
@@ -72,20 +63,17 @@ func CountsAfterCutoff(eventTime time.Time, asOf *time.Time) bool {
 // terjadi setelah cutoff (transaksi + mutasi), diurutkan kronologis,
 // beserta total dampak kasnya.
 func cashEventsAfter(db *gorm.DB, userID uint, brokerID int, asOf *time.Time) ([]dto.CashEvent, float64, error) {
-	var trades []models.Transaction
-	tradeQ := db.Where("user_id = ? AND broker_id = ?", userID, brokerID)
-	if asOf != nil {
-		tradeQ = tradeQ.Where("date > ?", *asOf)
+	if asOf == nil || asOf.IsZero() {
+		return []dto.CashEvent{}, 0, nil
 	}
+	var trades []models.Transaction
+	tradeQ := db.Where("user_id = ? AND broker_id = ? AND date > ?", userID, brokerID, *asOf)
 	if err := tradeQ.Find(&trades).Error; err != nil {
 		return nil, 0, err
 	}
 
 	var mutations []models.CashMutation
-	mutQ := db.Where("user_id = ? AND broker_id = ?", userID, brokerID)
-	if asOf != nil {
-		mutQ = mutQ.Where("COALESCE(email_received_at, date) > ?", *asOf)
-	}
+	mutQ := db.Where("user_id = ? AND broker_id = ? AND date > ?", userID, brokerID, *asOf)
 	if err := mutQ.Find(&mutations).Error; err != nil {
 		return nil, 0, err
 	}
@@ -130,11 +118,41 @@ func cashEventsAfter(db *gorm.DB, userID uint, brokerID int, asOf *time.Time) ([
 	return events, total, nil
 }
 
-// RecomputeBrokerCash menghitung ulang brokers.cash dari saldo dasar dan
-// event setelah cutoff. Tidak melakukan apa-apa bila cutoff belum diatur.
-func RecomputeBrokerCash(db *gorm.DB, userID uint, broker *models.Broker) error {
-	if broker.CashBaseAsOf == nil {
+func registrationTime(db *gorm.DB, userID uint) (time.Time, error) {
+	var user models.Users
+	if err := db.Select("id", "created_at").First(&user, userID).Error; err != nil {
+		return time.Time{}, err
+	}
+	if user.CreatedAt.IsZero() {
+		return time.Time{}, fmt.Errorf("user registration time is missing; cash changes are unsafe")
+	}
+	return user.CreatedAt, nil
+}
+
+// Resolve legacy metadata without guessing a corrected balance. The derived
+// base preserves stored cash, including any contamination that needs user review.
+// Call before inserting events, while holding the broker lock on write paths.
+func prepareCashBaseline(db *gorm.DB, userID uint, broker *models.Broker) error {
+	registered, err := registrationTime(db, userID)
+	if err != nil {
+		return err
+	}
+	if broker.CashBaseAsOf != nil && !broker.CashBaseAsOf.Before(registered) {
 		return nil
+	}
+	_, total, err := cashEventsAfter(db, userID, broker.ID, &registered)
+	if err != nil {
+		return err
+	}
+	broker.CashBase = broker.Cash - total
+	broker.CashBaseAsOf = &registered
+	return nil
+}
+
+// RecomputeBrokerCash updates the in-memory broker; the caller persists it.
+func RecomputeBrokerCash(db *gorm.DB, userID uint, broker *models.Broker) error {
+	if err := prepareCashBaseline(db, userID, broker); err != nil {
+		return err
 	}
 	_, total, err := cashEventsAfter(db, userID, broker.ID, broker.CashBaseAsOf)
 	if err != nil {
@@ -144,9 +162,12 @@ func RecomputeBrokerCash(db *gorm.DB, userID uint, broker *models.Broker) error 
 	return nil
 }
 
-// SetCashBase mengatur saldo dasar sebuah broker pada waktu tertentu,
-// lalu menghitung ulang cash = cash_base + event setelah cutoff.
+// SetCashBase resets the current balance under lock. Legacy asOf input is
+// deliberately ignored: backdated or future resets are not supported.
 func (r *BrokersRepository) SetCashBase(userID uint, id int, cashBase float64, asOf time.Time) (*models.Broker, error) {
+	if cashBase < 0 || math.IsNaN(cashBase) || math.IsInf(cashBase, 0) {
+		return nil, errs.BadRequest("Cash balance must be finite and nonnegative")
+	}
 	var broker models.Broker
 	err := r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -154,11 +175,17 @@ func (r *BrokersRepository) SetCashBase(userID uint, id int, cashBase float64, a
 			First(&broker).Error; err != nil {
 			return err
 		}
-		broker.CashBase = cashBase
-		broker.CashBaseAsOf = &asOf
-		if err := RecomputeBrokerCash(tx, userID, &broker); err != nil {
+		registered, err := registrationTime(tx, userID)
+		if err != nil {
 			return err
 		}
+		asOf = time.Now().UTC()
+		if registered.After(asOf) {
+			asOf = registered
+		}
+		broker.Cash = cashBase
+		broker.CashBase = cashBase
+		broker.CashBaseAsOf = &asOf
 		return tx.Save(&broker).Error
 	})
 	if err != nil {
@@ -175,15 +202,15 @@ func (r *BrokersRepository) GetCashBreakdown(userID uint, id int) (*dto.CashBrea
 		return nil, err
 	}
 
+	if err := prepareCashBaseline(r.db, userID, &broker); err != nil {
+		return nil, err
+	}
 	events, total, err := cashEventsAfter(r.db, userID, broker.ID, broker.CashBaseAsOf)
 	if err != nil {
 		return nil, err
 	}
 
-	cash := broker.Cash
-	if broker.CashBaseAsOf != nil {
-		cash = broker.CashBase + total
-	}
+	cash := broker.CashBase + total
 
 	return &dto.CashBreakdown{
 		BrokerId:     broker.ID,

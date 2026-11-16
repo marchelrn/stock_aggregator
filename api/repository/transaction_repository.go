@@ -39,6 +39,10 @@ func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.
 			return err
 		}
 
+		if err := prepareCashBaseline(tx, payload.UserID, &broker); err != nil {
+			return err
+		}
+
 		// NOTE: duplicate detection is identity-based (ticker/type/lot/price/
 		// date below). RefNo must not be used as a uniqueness key: a single
 		// trade confirmation legitimately contains several fills that share
@@ -51,8 +55,10 @@ func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.
 			payload.UserID, payload.Ticker, payload.Type, payload.Lot, payload.Price, payload.Date.Format("2006-01-02"), payload.BrokerID).
 			First(&existing).Error
 		if err == nil {
+			// Timestamp enrichment must not turn a history-only duplicate into a cash event.
 			if (existing.Date.Hour() == 0 && existing.Date.Minute() == 0 && existing.Date.Second() == 0) &&
-				!(payload.Date.Hour() == 0 && payload.Date.Minute() == 0 && payload.Date.Second() == 0) {
+				!(payload.Date.Hour() == 0 && payload.Date.Minute() == 0 && payload.Date.Second() == 0) &&
+				CountsAfterCutoff(existing.Date, broker.CashBaseAsOf) == CountsAfterCutoff(payload.Date, broker.CashBaseAsOf) {
 				if updateErr := tx.Model(&existing).Update("date", payload.Date).Error; updateErr != nil {
 					return updateErr
 				}
@@ -96,7 +102,7 @@ func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.
 
 		switch payload.Type {
 		case models.TypeBuy:
-			if broker.Cash < amountDone {
+			if applyCash && broker.Cash < amountDone {
 				return fmt.Errorf("Insufficient broker cash: have Rp.%.1f, need Rp.%.1f", broker.Cash, amountDone)
 			}
 
@@ -219,14 +225,33 @@ func (r *TransactionRepository) CountTransactionsByTicker(userID uint, ticker st
 }
 
 func (r *TransactionRepository) DeleteTransaction(userID uint, id int) error {
-	result := r.db.Where("user_id = ? AND id = ?", userID, id).Delete(&models.Transaction{})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return nil
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		var trade models.Transaction
+		if err := tx.Where("user_id = ? AND id = ?", userID, id).First(&trade).Error; err != nil {
+			return err
+		}
+		var broker models.Broker
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND id = ?", userID, trade.BrokerID).First(&broker).Error; err != nil {
+			return err
+		}
+		if err := prepareCashBaseline(tx, userID, &broker); err != nil {
+			return err
+		}
+		result := tx.Where("user_id = ? AND id = ?", userID, id).Delete(&models.Transaction{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		if CountsAfterCutoff(trade.Date, broker.CashBaseAsOf) {
+			broker.Cash -= TradeCashDelta(&trade)
+		}
+		if err := ReconcileStockHolding(tx, userID, trade.Ticker, trade.BrokerID); err != nil {
+			return err
+		}
+		return tx.Save(&broker).Error
+	})
 }
 
 func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades []*models.Transaction) (int, error) {
@@ -254,7 +279,7 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 	for _, trade := range trades {
 		trade.UserID = userID
 		if trade.Date.IsZero() {
-			trade.Date = time.Now()
+			return 0, fmt.Errorf("trade date is required for cash eligibility")
 		}
 		trade.Ticker = strings.ToUpper(strings.TrimSpace(trade.Ticker))
 		if trade.BrokerID == 0 && trade.BrokerName != "" {
@@ -267,9 +292,10 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 					Name:   strings.TrimSpace(trade.BrokerName),
 					Cash:   0,
 				}
-				if createErr := r.db.Create(&newBroker).Error; createErr == nil {
-					trade.BrokerID = newBroker.ID
+				if _, createErr := ImplBrokersRepository(r.db).AddBrokerData(&newBroker); createErr != nil {
+					return 0, createErr
 				}
+				trade.BrokerID = newBroker.ID
 			}
 		}
 
@@ -344,6 +370,9 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND id = ?", userID, key.brokerID).First(&broker).Error; err != nil {
 					return fmt.Errorf("lock broker %d: %w", key.brokerID, err)
 				}
+				if err := prepareCashBaseline(tx, userID, &broker); err != nil {
+					return err
+				}
 			}
 
 			// Group by Ticker within this broker & date
@@ -393,9 +422,13 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 					var existing models.Transaction
 					err := query.First(&existing).Error
 					if err == nil {
+						// Keep a duplicate on its original side of the cash boundary.
 						if (existing.Date.Hour() == 0 && existing.Date.Minute() == 0 && existing.Date.Second() == 0) &&
-							!(trade.Date.Hour() == 0 && trade.Date.Minute() == 0 && trade.Date.Second() == 0) {
-							_ = tx.Model(&existing).Update("date", trade.Date).Error
+							!(trade.Date.Hour() == 0 && trade.Date.Minute() == 0 && trade.Date.Second() == 0) &&
+							CountsAfterCutoff(existing.Date, broker.CashBaseAsOf) == CountsAfterCutoff(trade.Date, broker.CashBaseAsOf) {
+							if err := tx.Model(&existing).Update("date", trade.Date).Error; err != nil {
+								return err
+							}
 						}
 						continue
 					} else if err != gorm.ErrRecordNotFound {
@@ -612,7 +645,8 @@ func ReconcileStockHolding(tx *gorm.DB, userID uint, ticker string, brokerID int
 	}
 
 	if len(allTrades) == 0 {
-		return nil
+		return tx.Model(&models.StockHolding{}).Where("user_id = ? AND ticker = ? AND broker_id = ?", userID, ticker, brokerID).
+			Updates(map[string]interface{}{"lot": 0, "avg_price": 0}).Error
 	}
 
 	// Group transactions by date

@@ -1,8 +1,12 @@
 package repository
 
 import (
+	"math"
+
 	"github.com/marchelrn/stock_api/models"
+	errs "github.com/marchelrn/stock_api/pkg/error"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type BrokersRepository struct {
@@ -30,6 +34,15 @@ func (r *BrokersRepository) GetAllBrokerHoldings(userID uint) ([]models.StockHol
 }
 
 func (r *BrokersRepository) AddBrokerData(payload *models.Broker) (*models.Broker, error) {
+	if payload.Cash < 0 || math.IsNaN(payload.Cash) || math.IsInf(payload.Cash, 0) {
+		return nil, errs.BadRequest("Initial cash must be finite and nonnegative")
+	}
+	registered, err := registrationTime(r.db, payload.UserID)
+	if err != nil {
+		return nil, err
+	}
+	payload.CashBase = payload.Cash
+	payload.CashBaseAsOf = &registered
 	if err := r.db.Create(payload).Error; err != nil {
 		return nil, err
 	}
@@ -82,24 +95,27 @@ func (r *BrokersRepository) GetBrokerById(userID uint, id int) (*models.Broker, 
 	return &broker, nil
 }
 
+// UpdateBrokerData atomically adds payload.Cash to the current balance.
 func (r *BrokersRepository) UpdateBrokerData(userID uint, id int, payload *models.Broker) (*models.Broker, error) {
+	if payload.Cash < 0 || math.IsNaN(payload.Cash) || math.IsInf(payload.Cash, 0) {
+		return nil, errs.BadRequest("Cash addition must be finite and nonnegative")
+	}
 	var broker models.Broker
-	if err := r.db.Where("user_id = ? AND id = ?", userID, id).First(&broker).Error; err != nil {
-		return nil, err
-	}
-	if payload.Name != "" {
-		broker.Name = payload.Name
-	}
-	broker.Cash = payload.Cash
-	// Sinkronkan juga saldo dasar bila caller membawanya (penyesuaian
-	// manual seperti transfer/tambah cash harus menggeser cash_base
-	// agar rumus cash = cash_base + event tetap berlaku).
-	if payload.CashBaseAsOf != nil {
-		broker.CashBase = payload.CashBase
-		broker.CashBaseAsOf = payload.CashBaseAsOf
-	}
-
-	if err := r.db.Save(&broker).Error; err != nil {
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND id = ?", userID, id).First(&broker).Error; err != nil {
+			return err
+		}
+		if err := prepareCashBaseline(tx, userID, &broker); err != nil {
+			return err
+		}
+		if payload.Name != "" {
+			broker.Name = payload.Name
+		}
+		broker.Cash += payload.Cash
+		broker.CashBase += payload.Cash
+		return tx.Save(&broker).Error
+	})
+	if err != nil {
 		return nil, err
 	}
 	return &broker, nil
