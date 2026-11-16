@@ -1,5 +1,5 @@
 import { formatCurrency, formatNumber } from '../lib/formatters'
-import { X } from 'lucide-react'
+import { Pencil, X } from 'lucide-react'
 import type { Broker } from '../types'
 
 interface BrokerTableProps {
@@ -8,6 +8,7 @@ interface BrokerTableProps {
   allocations?: Record<number, number>
   onToggle?: (id: number) => void
   onRemove?: (broker: Broker) => void
+  onEditCash?: (broker: Broker) => void
 }
 
 export default function BrokerTable({
@@ -16,6 +17,7 @@ export default function BrokerTable({
   allocations = {},
   onToggle,
   onRemove,
+  onEditCash,
 }: BrokerTableProps) {
   const isOnlyBroker = brokers.length === 1
   return (
@@ -46,7 +48,18 @@ export default function BrokerTable({
                 </td>
                 <td className="border-b border-slate-100 p-2 text-sm text-center">{broker.name}</td>
                 <td className="border-b border-slate-100 p-2 text-sm text-center">
-                  {formatCurrency(broker.cash)}
+                  <span className="inline-flex items-center gap-1.5">
+                    {formatCurrency(broker.cash)}
+                    <button
+                      type="button"
+                      onClick={() => onEditCash?.(broker)}
+                      aria-label={`Atur saldo kas ${broker.name}`}
+                      title="Atur saldo dasar kas"
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-slate-400 transition hover:bg-teal-50 hover:text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-300"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                  </span>
                 </td>
                 <td className="border-b border-slate-100 p-2 text-sm text-center">
                   {formatNumber(allocations[broker.id] ?? 0, 1)}%

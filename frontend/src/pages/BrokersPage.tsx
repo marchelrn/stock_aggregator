@@ -9,7 +9,7 @@ import HoldingTable from '../components/HoldingTable'
 import TransactionHistory from '../components/TransactionHistory'
 import StockPrices from '../components/StockPrices'
 import CashMutationHistory from '../components/CashMutationHistory'
-import CashBasePanel from '../components/CashBasePanel'
+import CashBaseModal from '../components/CashBaseModal'
 
 interface TradeModalState {
   open: boolean
@@ -51,6 +51,9 @@ export default function BrokersPage() {
 
   const [brokerToRemove, setBrokerToRemove] = useState<Broker | null>(null)
   const [removing, setRemoving] = useState(false)
+
+  // Broker yang sedang diatur saldo dasarnya (modal Atur Saldo Kas)
+  const [cashBaseBroker, setCashBaseBroker] = useState<Broker | null>(null)
 
   const [configureOpen, setConfigureOpen] = useState(false)
   const [configBrokerName, setConfigBrokerName] = useState('')
@@ -323,11 +326,9 @@ export default function BrokersPage() {
             allocations={brokerAllocations}
             onToggle={handleToggleBroker}
             onRemove={setBrokerToRemove}
+            onEditCash={setCashBaseBroker}
           />
         </section>
-
-        {/* Atur Saldo Kas (cash_base manual + event setelah cutoff) */}
-        <CashBasePanel brokers={state.brokers} />
 
         {/* Gmail Sync Section */}
         <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
@@ -453,6 +454,10 @@ export default function BrokersPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {cashBaseBroker && (
+        <CashBaseModal broker={cashBaseBroker} onClose={() => setCashBaseBroker(null)} />
       )}
 
       {tradeModal.open && (
