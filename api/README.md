@@ -104,7 +104,7 @@ Existing `PUT /broker/:id` remains an **addition** of the submitted `cash`, not 
 
 **This does not repair or certify old cash balances.** Previously replayed historical trades/mutations, duplicate cash, or email-time effects may already have contaminated them. A derived legacy baseline may be negative and is not asserted to be the user's original manual balance. Users must enter their verified current broker balance through Set Cash to correct it; history/holdings need not be deleted or reimported. Brokers without a matching user/registration timestamp are not assigned invented cutoffs by the migration and need data review. Runtime fallback for missing/early baseline metadata similarly preserves stored cash, subtracting already-recorded eligible deltas to derive baseline metadata before applying new events; read-only breakdown does not persist that normalization.
 
-Repository/migration regressions use SQLite in memory only (`gorm.io/driver/sqlite`, requiring CGO for tests); production remains PostgreSQL. No live database/Gmail is required by these tests. SQLite does not validate PostgreSQL row-lock/concurrency behavior or production numeric rounding.
+Regression tests and investigation tools are maintained on the `testing` branch. The `main` branch contains the application and uses PostgreSQL.
 
 ### Market data (Yahoo Finance)
 

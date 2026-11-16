@@ -14,3 +14,11 @@ node_modules
 /OPTIMIZATION_REPORT.md
 /RINGKASAN*.md
 /checkpoint/
+
+# Tests and investigation tools are maintained on the testing branch
+*_test.go
+/frontend/tests/
+/api/cmd/test_*/
+/api/cmd/check_rlco_emails/
+/api/cmd/inspect_jago_and_statement/
+/api/cmd/investigate_cash_leak/
