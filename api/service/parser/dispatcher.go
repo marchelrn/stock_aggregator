@@ -83,6 +83,10 @@ func (d *BrokerDispatcherParser) ParseEmail(ctx context.Context, data []byte, me
 	subj := strings.ToLower(meta.Subject)
 	filename := strings.ToLower(meta.Filename)
 
+	if strings.Contains(from, "trimegah") || strings.Contains(from, "trim.operation") || strings.Contains(subj, "trimegah") || strings.Contains(filename, "trimegah") || bytes.Contains(data, []byte("TRIMEGAH")) {
+		return d.trimegah.ParseEmail(ctx, data, meta)
+	}
+
 	// IPO allotment confirmations (TC_EIPO_*.pdf) use a different table layout
 	// (Buy/Refund columns) and must be routed before the regular Stockbit
 	// parser, which rejects them as inapplicable.
@@ -113,7 +117,7 @@ func (d *BrokerDispatcherParser) ParseEmail(ctx context.Context, data []byte, me
 		}
 	}
 
-	if strings.Contains(from, "trimegah") || strings.Contains(from, "trim.operation") || strings.Contains(subj, "tc") || bytes.Contains(data, []byte("TRIMEGAH")) {
+	if strings.Contains(subj, "tc") {
 		trades, err := d.trimegah.ParseEmail(ctx, data, meta)
 		if err == nil && len(trades) > 0 {
 			return trades, nil
@@ -147,15 +151,26 @@ func (d *BrokerDispatcherParser) ParseEmail(ctx context.Context, data []byte, me
 }
 
 func (d *BrokerDispatcherParser) EmailSelectors(ctx context.Context) ([]EmailMetadata, error) {
+	selectors := []EmailMetadata{{From: "no-reply@stockbit.com", Subject: "Trade Confirmation"}}
 	if d.metadata != nil {
-		selectors, err := d.metadata.EmailSelectors(ctx)
-		if err == nil && len(selectors) > 0 {
-			return selectors, nil
+		var err error
+		selectors, err = d.metadata.EmailSelectors(ctx)
+		if err != nil {
+			return nil, err
 		}
 	}
-	return []EmailMetadata{
-		{From: "no-reply@stockbit.com", Subject: "Trade Confirmation"},
-		{From: "trim.operation@trimegah.com", Subject: "TC"},
-		{From: "trim.operation@trimegah.com", Subject: "Trade Confirmation"},
-	}, nil
+	trimegahSelectors, err := d.trimegah.EmailSelectors(ctx)
+	if err != nil {
+		return nil, err
+	}
+	selectors = append(selectors, trimegahSelectors...)
+	merged := make([]EmailMetadata, 0, len(selectors))
+	seen := make(map[EmailMetadata]bool, len(selectors))
+	for _, selector := range selectors {
+		if !seen[selector] {
+			seen[selector] = true
+			merged = append(merged, selector)
+		}
+	}
+	return merged, nil
 }

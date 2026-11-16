@@ -30,6 +30,7 @@ func getMigrations() []migration {
 		getCreateTableCashMutations(),
 		getAddCashBaseToBrokers(),
 		getAddTrimegahTemplate(),
+		getDisableLegacyTrimegahDiscoveryTemplate(),
 	}
 }
 

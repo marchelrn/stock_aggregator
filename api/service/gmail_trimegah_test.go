@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/marchelrn/stock_api/models"
@@ -19,6 +20,21 @@ func (s *testTemplateStore) ListActive(ctx context.Context) ([]models.PDFParsing
 // TestGmailQueryIncludesTrimegah verifies that when Trimegah template is active,
 // the Gmail sync query includes trim.operation@trimegah.com as a sender filter.
 func TestGmailQueryIncludesTrimegah(t *testing.T) {
+	config, err := json.Marshal(parser.MetadataConfig{
+		SchemaVersion:   1,
+		RequiredMarkers: []string{"SYNTHETIC"},
+		SharesPerLot:    100,
+		Date:            parser.MetadataDate{Pattern: `Date: (\d{4}-\d{2}-\d{2})`, Group: 1, Layout: "2006-01-02"},
+		Table: parser.MetadataTable{
+			StartPattern: "BEGIN", EndPattern: "END",
+			RowPattern: `([A-Z]+) (\d+) (\d+) ([0-9.]+) ([0-9.]+) ([0-9.]+)`,
+			Fields:     map[string]int{"ticker": 1, "lot": 2, "quantity": 3, "price": 4, "buy_amount": 5, "sell_amount": 6},
+		},
+		Numbers: parser.MetadataNumbers{DecimalSeparator: ".", ThousandsSeparator: ",", GroupingSize: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	store := &testTemplateStore{
 		templates: []models.PDFParsingTemplate{
 			{
@@ -29,6 +45,7 @@ func TestGmailQueryIncludesTrimegah(t *testing.T) {
 				Active:          true,
 				EmailSender:     "no-reply@stockbit.com",
 				SubjectContains: "Trade Confirmation",
+				Config:          config,
 			},
 			{
 				ID:              2,
@@ -38,6 +55,7 @@ func TestGmailQueryIncludesTrimegah(t *testing.T) {
 				Active:          true,
 				EmailSender:     "trim.operation@trimegah.com",
 				SubjectContains: "TC",
+				Config:          config,
 			},
 		},
 	}
@@ -59,7 +77,7 @@ func TestGmailQueryIncludesTrimegah(t *testing.T) {
 
 	// Query harus include kedua sender
 	expectedFragments := []string{
-		`subject:("trade confirmation" OR "konfirmasi transaksi" OR "contract note")`,
+		`subject:("trade confirmation" OR "konfirmasi transaksi" OR "contract note" OR "tc")`,
 		"has:attachment",
 		"filename:pdf",
 		`from:"no-reply@stockbit.com"`,

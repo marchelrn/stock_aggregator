@@ -675,11 +675,21 @@ func (s *GmailServiceImpl) tradeConfirmationQuery(ctx context.Context, lastSyncA
 	}
 
 	var senders []string
+	var extraSubjects []string
+	seenSubjects := map[string]bool{"trade confirmation": true, "konfirmasi transaksi": true, "contract note": true}
+	wildcardSender := false
 	seen := make(map[string]bool)
 	for _, selector := range selectors {
+		subject := strings.ToLower(strings.TrimSpace(selector.Subject))
+		if strings.ContainsAny(subject, "\r\n\"\\") {
+			return "", fmt.Errorf("invalid Gmail selector subject")
+		}
+		if subject != "" && !seenSubjects[subject] {
+			extraSubjects = append(extraSubjects, fmt.Sprintf("\"%s\"", subject))
+			seenSubjects[subject] = true
+		}
 		if selector.From == "" {
-			// Skip selectors without a sender; they match any sender.
-			// Gmail query cannot express this, so rely on local ParseEmail filtering.
+			wildcardSender = true
 			continue
 		}
 		// Validate even injected providers: only a bare mailbox may enter the
@@ -694,8 +704,12 @@ func (s *GmailServiceImpl) tradeConfirmationQuery(ctx context.Context, lastSyncA
 			seen[key] = true
 		}
 	}
-	// Add sender filters to query. If no senders configured, rely on subject+attachment query.
-	if len(senders) > 0 {
+	// Discovery must include broker-specific subjects (e.g. Trimegah's "TC").
+	// Exact sender/subject/filename matching remains the parser's responsibility.
+	if len(extraSubjects) > 0 {
+		query = strings.Replace(query, `"contract note")`, `"contract note" OR `+strings.Join(extraSubjects, " OR ")+")", 1)
+	}
+	if len(senders) > 0 && !wildcardSender {
 		query += " {" + strings.Join(senders, " ") + "}"
 	}
 	return query, nil

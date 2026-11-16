@@ -2,8 +2,77 @@ package parser
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
+
+	"github.com/marchelrn/stock_api/models"
 )
+
+func TestBrokerDispatcherParser_EmailSelectorsMerge(t *testing.T) {
+	stockbit := EmailMetadata{From: "confirmation@stockbit.com", Subject: "Trade Confirmation", Filename: ".pdf"}
+	trimegahTC := EmailMetadata{From: "trim.operation@trimegah.com", Subject: "TC"}
+	trimegahConfirmation := EmailMetadata{From: "trim.operation@trimegah.com", Subject: "Trade Confirmation"}
+	for _, duplicate := range []bool{false, true} {
+		name := "Stockbit templates only"
+		input := []EmailMetadata{stockbit}
+		want := []EmailMetadata{stockbit, trimegahTC, trimegahConfirmation}
+		if duplicate {
+			name = "deduplicate full tuples"
+			withFilename := trimegahTC
+			withFilename.Filename = ".pdf"
+			input = []EmailMetadata{stockbit, stockbit, trimegahTC, withFilename}
+			want = []EmailMetadata{stockbit, trimegahTC, withFilename, trimegahConfirmation}
+		}
+		t.Run(name, func(t *testing.T) {
+			store := &metadataFakeStore{}
+			for i, selector := range input {
+				template := metadataTestTemplate(t, metadataTestConfig())
+				template.Version = i + 1
+				template.EmailSender = selector.From
+				template.SubjectContains = selector.Subject
+				template.FilenameSuffix = selector.Filename
+				store.templates = append(store.templates, template)
+			}
+			dispatcher := NewBrokerDispatcherParser(NewMetadataParser(store), NewStockbitParser(), NewMandiriParser(), NewTrimegahParser())
+			selectors, err := dispatcher.EmailSelectors(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(selectors) != len(want) {
+				t.Fatalf("expected selectors %+v, got %+v", want, selectors)
+			}
+			for i := range want {
+				if selectors[i] != want[i] {
+					t.Errorf("selector %d: expected %+v, got %+v", i, want[i], selectors[i])
+				}
+			}
+		})
+	}
+}
+
+func TestBrokerDispatcherParser_EmailSelectorsErrors(t *testing.T) {
+	storeErr := errors.New("template store unavailable")
+	invalid := metadataTestTemplate(t, metadataTestConfig())
+	invalid.Config = []byte(`{}`)
+	for name, metadata := range map[string]*MetadataParser{
+		"nil store":           NewMetadataParser(nil),
+		"store error":         NewMetadataParser(&metadataFakeStore{err: storeErr}),
+		"no active templates": NewMetadataParser(&metadataFakeStore{}),
+		"invalid template":    NewMetadataParser(&metadataFakeStore{templates: []models.PDFParsingTemplate{invalid}}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			dispatcher := NewBrokerDispatcherParser(metadata, NewStockbitParser(), NewMandiriParser(), NewTrimegahParser())
+			selectors, err := dispatcher.EmailSelectors(context.Background())
+			if err == nil || selectors != nil {
+				t.Fatalf("expected metadata error without fallback selectors, got %+v, %v", selectors, err)
+			}
+			if name == "store error" && !errors.Is(err, storeErr) {
+				t.Errorf("expected original store error, got %v", err)
+			}
+		})
+	}
+}
 
 // TC_EIPO files carry a "Buy/Refund" table with the ticker attached to the
 // company name; they must be routed to the EIPO parser, not the regular
@@ -50,8 +119,171 @@ CDIA PT Chandra Daya Investasi Tbk
 	}
 }
 
+func TestBrokerDispatcherParser_StockbitTCFilename(t *testing.T) {
+	pdf := metadataTestPDF(`Trade Confirmation
+Transaction Date
+06/11/2026
+REF #
+Board
+Share
+Lot
+Quantity
+Price
+Buy
+Sell
+0033568
+RG
+PART Cipta Perdana Lancar Tbk.
+249
+24,900.00
+98.00
+2,440,200.00
+0.00`)
+	for _, from := range []string{"confirmation@stockbit.com", "confirmation@example.test"} {
+		t.Run(from, func(t *testing.T) {
+			dispatcher := NewBrokerDispatcherParser(NewMetadataParser(nil), NewStockbitParser(), NewMandiriParser(), NewTrimegahParser())
+			meta := EmailMetadata{From: from, Subject: "TC 06 Nov 2026", Filename: "TC_TEST001-20261106.pdf"}
+			trades, err := dispatcher.ParseEmail(context.Background(), pdf, meta)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(trades) != 1 {
+				t.Fatalf("expected 1 trade, got %d: %+v", len(trades), trades)
+			}
+			if trade := trades[0]; trade.BrokerName != "Stockbit Sekuritas" || trade.Ticker != "PART" || trade.Type != "BUY" || trade.Lot != 249 || trade.Price != 98 {
+				t.Errorf("unexpected trade: %+v", trade)
+			}
+		})
+	}
+}
+
+func TestBrokerDispatcherParser_EIPORefundOnly(t *testing.T) {
+	pdf := metadataTestPDF(`Trade Confirmation
+Allotment Date
+07/07/2025
+REF #
+Board
+Share
+Lot
+Quantity
+Price
+Buy
+Refund
+TEST001
+IPO
+JELI PT Jaya Guna Elektronik Tbk
+5
+500
+200
+0
+100,000`)
+	dispatcher := NewBrokerDispatcherParser(NewMetadataParser(nil), NewStockbitParser(), NewMandiriParser(), NewTrimegahParser())
+	meta := EmailMetadata{From: "confirmation@stockbit.com", Subject: "Trade Confirmation - IPO", Filename: "TC_EIPO_JELI_TEST001.pdf"}
+	trades, err := dispatcher.ParseEmail(context.Background(), pdf, meta)
+	if !errors.Is(err, ErrEmailNotApplicable) || len(trades) != 0 {
+		t.Fatalf("expected refund-only skip, got trades=%+v, err=%v", trades, err)
+	}
+}
+
+func TestBrokerDispatcherParser_TrimegahPDFRouting(t *testing.T) {
+	content := `KONFIRMASI TRANSAKSI
+Tanggal : 30 Oktober 2026
+Kode Nasabah : TEST001
+BELI RG MIDI MIDI UTAMA INDONESIA Tbk, PT 258 4,300 (1,109,400)
+Total Transaksi BELI : (1,109,400)
+Total Pembebanan : 2,014
+Nilai Transaksi Bersih : (1,111,414)`
+
+	tests := []struct {
+		name    string
+		meta    EmailMetadata
+		content string
+	}{
+		{
+			name:    "sender with TC filename",
+			meta:    EmailMetadata{From: "trim.operation@trimegah.com", Subject: "TC 30 Oct 2026", Filename: "TC_TEST001-20261030.pdf"},
+			content: content,
+		},
+		{
+			name:    "sender wins over Stockbit skip marker",
+			meta:    EmailMetadata{From: "trim.operation@trimegah.com", Subject: "TC 30 Oct 2026", Filename: "TC_TEST001-20261030.pdf"},
+			content: content + "\nRefund : 0",
+		},
+		{
+			name:    "sender wins over EIPO filename heuristic",
+			meta:    EmailMetadata{From: "TRIM.OPERATION@TRIMEGAH.COM", Subject: "Trade Confirmation", Filename: "TC_EIPO001-20261030.pdf"},
+			content: content,
+		},
+		{
+			name:    "sender alias wins over IPO subject heuristic",
+			meta:    EmailMetadata{From: "trim.operation@example.test", Subject: "TC - IPO TEST", Filename: "TC_TEST001-20261030.pdf"},
+			content: content,
+		},
+		{
+			name:    "broker subject wins over generic filename",
+			meta:    EmailMetadata{Subject: "TRIMEGAH Trade Confirmation", Filename: "TC_TEST001-20261030.pdf"},
+			content: content + "\nRefund : 0",
+		},
+		{
+			name:    "broker filename wins over generic filename",
+			meta:    EmailMetadata{Filename: "TC_TRIMEGAH_TEST001.pdf"},
+			content: content + "\nRefund : 0",
+		},
+		{
+			name:    "broker content wins over generic filename",
+			meta:    EmailMetadata{Filename: "TC_TEST001-20261030.pdf"},
+			content: "PT TRIMEGAH SEKURITAS\n" + content + "\nRefund : 0",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dispatcher := NewBrokerDispatcherParser(NewMetadataParser(nil), NewStockbitParser(), NewMandiriParser(), NewTrimegahParser())
+			trades, err := dispatcher.ParseEmail(context.Background(), metadataTestPDF(tt.content), tt.meta)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(trades) != 1 {
+				t.Fatalf("expected 1 trade, got %d: %+v", len(trades), trades)
+			}
+			trade := trades[0]
+			if trade.BrokerName != "Trimegah Sekuritas" || trade.Ticker != "MIDI" || trade.Type != "BUY" || trade.Lot != 43 || trade.Price != 258 || trade.AmountDone != 1111414 {
+				t.Errorf("unexpected trade: %+v", trade)
+			}
+		})
+	}
+}
+
+func TestBrokerDispatcherParser_TrimegahErrors(t *testing.T) {
+	tests := []struct {
+		name          string
+		data          []byte
+		wantError     string
+		notApplicable bool
+	}{
+		{name: "invalid PDF", data: []byte("not a PDF"), wantError: "gagal membaca PDF Trimegah"},
+		{name: "no trades", data: metadataTestPDF("KONFIRMASI TRANSAKSI\nTanggal : 30 Oktober 2026"), wantError: "tidak ada transaksi ditemukan pada PDF Trimegah"},
+		{name: "empty PDF", data: metadataTestPDF(""), notApplicable: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dispatcher := NewBrokerDispatcherParser(NewMetadataParser(nil), NewStockbitParser(), NewMandiriParser(), NewTrimegahParser())
+			meta := EmailMetadata{From: "trim.operation@trimegah.com", Subject: "TC 30 Oct 2026", Filename: "TC_TEST001-20261030.pdf"}
+			trades, err := dispatcher.ParseEmail(context.Background(), tt.data, meta)
+			if err == nil || len(trades) != 0 {
+				t.Fatalf("expected an error and no trades, got trades=%+v, err=%v", trades, err)
+			}
+			if errors.Is(err, ErrEmailNotApplicable) != tt.notApplicable {
+				t.Errorf("expected not-applicable=%v, got %v", tt.notApplicable, err)
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Errorf("expected error containing %q, got %v", tt.wantError, err)
+			}
+		})
+	}
+}
+
 func TestBrokerDispatcherParser_TrimegahRouting(t *testing.T) {
-	metadata := NewMetadataParser(nil)
+	var metadata *MetadataParser
 	stockbit := NewStockbitParser()
 	mandiri := NewMandiriParser()
 	trimegah := NewTrimegahParser()
