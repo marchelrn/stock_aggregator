@@ -9,17 +9,25 @@ import (
 )
 
 type Repository struct {
-	Stocks           StocksRepository
-	Brokers          BrokerRepository
-	Transactions     TransactionRepository
-	CashMutations    CashMutationRepository
-	Yahoo            YahooRepository
-	Auth             AuthRepository
-	PDFTemplates     PDFTemplateRepository
+	Stocks        StocksRepository
+	Brokers       BrokerRepository
+	Transactions  TransactionRepository
+	CashMutations CashMutationRepository
+	Yahoo         YahooRepository
+	Auth          AuthRepository
+	PDFTemplates  PDFTemplateRepository
+	GmailCache    GmailCacheRepository
 }
 
 type PDFTemplateRepository interface {
 	ListActive(context.Context) ([]models.PDFParsingTemplate, error)
+}
+
+type GmailCacheRepository interface {
+	IsProcessed(ctx context.Context, userID uint, messageID, messageType string) (bool, error)
+	MarkProcessed(ctx context.Context, userID uint, messageID, messageType string, tradeCount int) error
+	GetProcessedMessageIDs(ctx context.Context, userID uint, messageType string) (map[string]bool, error)
+	ClearOldCache(ctx context.Context, olderThan time.Duration) error
 }
 
 type AuthRepository interface {

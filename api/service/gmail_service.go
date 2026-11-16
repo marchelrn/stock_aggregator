@@ -25,11 +25,12 @@ import (
 )
 
 type GmailServiceImpl struct {
-	AuthRepository     contract.AuthRepository
-	TradeParser        TradeConfirmationParser
-	TransactionRepo    contract.TransactionRepository
-	CashMutationRepo   contract.CashMutationRepository
-	BrokerRepo         contract.BrokerRepository
+	AuthRepository   contract.AuthRepository
+	TradeParser      TradeConfirmationParser
+	TransactionRepo  contract.TransactionRepository
+	CashMutationRepo contract.CashMutationRepository
+	BrokerRepo       contract.BrokerRepository
+	GmailCacheRepo   contract.GmailCacheRepository
 }
 
 // TradeConfirmationParser is the interface for parsing trade confirmation PDFs
@@ -50,13 +51,17 @@ type emailSelectorProvider interface {
 
 const gmailSyncTimeout = 5 * time.Minute
 
-func ImplGmailService(authRepo contract.AuthRepository, parser TradeConfirmationParser, txRepo contract.TransactionRepository, cashRepo contract.CashMutationRepository, brokerRepo contract.BrokerRepository) contract.GmailService {
+// v2 ignores legacy markers written before persistence or for skipped PDFs.
+const tradeConfirmationCacheType = "trade_confirmation:v2"
+
+func ImplGmailService(authRepo contract.AuthRepository, parser TradeConfirmationParser, txRepo contract.TransactionRepository, cashRepo contract.CashMutationRepository, brokerRepo contract.BrokerRepository, cacheRepo contract.GmailCacheRepository) contract.GmailService {
 	return &GmailServiceImpl{
-		AuthRepository:     authRepo,
-		TradeParser:        parser,
-		TransactionRepo:    txRepo,
-		CashMutationRepo:   cashRepo,
-		BrokerRepo:         brokerRepo,
+		AuthRepository:   authRepo,
+		TradeParser:      parser,
+		TransactionRepo:  txRepo,
+		CashMutationRepo: cashRepo,
+		BrokerRepo:       brokerRepo,
+		GmailCacheRepo:   cacheRepo,
 	}
 }
 
@@ -257,7 +262,20 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 	}
 	var allTrades []dto.ParsedTrade
 	var emailCount int
+	var skippedCount int
+	pendingMessages := make(map[string]int)
 	pageToken := ""
+
+	// Load processed message IDs in bulk (more efficient than checking one-by-one)
+	processedIDs := make(map[string]bool)
+	if s.GmailCacheRepo != nil {
+		var err error
+		processedIDs, err = s.GmailCacheRepo.GetProcessedMessageIDs(ctx, user.Id, tradeConfirmationCacheType)
+		if err != nil {
+			log.Printf("Warning: failed to load Gmail cache, will process all messages: %v", err)
+		}
+	}
+
 	for {
 		messages, err := gmailSrv.Users.Messages.List("me").Q(query).MaxResults(50).PageToken(pageToken).Context(ctx).Do()
 		if err != nil {
@@ -268,6 +286,13 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 			if msg == nil || msg.Id == "" {
 				return nil, fmt.Errorf("Gmail search returned a message without an ID")
 			}
+
+			// Skip if already processed (cache hit)
+			if processedIDs[msg.Id] {
+				skippedCount++
+				continue
+			}
+
 			fullMsg, err := gmailSrv.Users.Messages.Get("me", msg.Id).Format("full").Context(ctx).Do()
 			if err != nil {
 				// Hard failure: abort so the checkpoint is not advanced and the
@@ -282,6 +307,11 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 			}
 			allTrades = append(allTrades, trades...)
 			emailCount++
+
+			// A skipped/unreadable PDF is not proof of a completed import.
+			if len(trades) > 0 {
+				pendingMessages[msg.Id] = len(trades)
+			}
 		}
 		pageToken = messages.NextPageToken
 		if pageToken == "" {
@@ -315,6 +345,16 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 		syncedCount = synced
 	}
 
+	// Only persisted batches may be skipped later. A parse-only run or failed
+	// batch must leave messages eligible for retry.
+	if s.TransactionRepo != nil && s.GmailCacheRepo != nil {
+		for messageID, tradeCount := range pendingMessages {
+			if err := s.GmailCacheRepo.MarkProcessed(ctx, user.Id, messageID, tradeConfirmationCacheType, tradeCount); err != nil {
+				log.Printf("Warning: failed to cache persisted message %s: %v", messageID, err)
+			}
+		}
+	}
+
 	// Save a copy so an unsuccessful repository update cannot advance the
 	// caller's checkpoint. Use the start time to retain mail arriving mid-sync.
 	updated := *user
@@ -324,11 +364,13 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 	}
 	*user = updated
 
-	message := fmt.Sprintf("Berhasil parse %d trade dari %d email, disimpan %d trade", len(allTrades), emailCount, syncedCount)
+	message := fmt.Sprintf("Berhasil parse %d trade dari %d email (%d di-skip dari cache), disimpan %d trade", len(allTrades), emailCount, skippedCount, syncedCount)
 	if s.TransactionRepo == nil {
-		message = fmt.Sprintf("Berhasil parse %d trade dari %d email; belum disimpan", len(allTrades), emailCount)
-	} else if emailCount == 0 {
+		message = fmt.Sprintf("Berhasil parse %d trade dari %d email (%d di-skip); belum disimpan", len(allTrades), emailCount, skippedCount)
+	} else if emailCount == 0 && skippedCount == 0 {
 		message = "Tidak ada email trade confirmation baru ditemukan"
+	} else if emailCount == 0 {
+		message = fmt.Sprintf("Semua %d email sudah pernah diproses (dari cache)", skippedCount)
 	}
 	return &dto.GmailSyncResponse{
 		StatusCode:   http.StatusOK,
