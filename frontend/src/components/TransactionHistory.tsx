@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { formatNumber, formatCurrency } from '../lib/formatters'
 import type { Transaction } from '../types'
 
@@ -6,19 +6,40 @@ interface TransactionHistoryProps {
   transactionHistory?: Transaction[]
 }
 
+const PAGE_SIZE = 5
+
 export default function TransactionHistory({ transactionHistory = [] }: TransactionHistoryProps) {
-  const [transactions, setTransactions] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
+  const [page, setPage] = useState(1)
+
+  useEffect(() => {
+    setPage(1)
+  }, [searchTerm])
+
+  const filtered = transactionHistory.filter((transaction) => {
+    if (!searchTerm.trim()) return true
+    const term = searchTerm.toLowerCase()
+    return (
+      transaction.stock?.ticker?.toLowerCase().includes(term) ||
+      transaction.broker?.name?.toLowerCase().includes(term)
+    )
+  })
+
+  const totalItems = filtered.length
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const startIndex = (currentPage - 1) * PAGE_SIZE
+  const pageItems = filtered.slice(startIndex, startIndex + PAGE_SIZE)
 
   return (
     <div>
       <form className="mt-3 flex flex-col gap-1 sm:flex-row" onSubmit={(e) => e.preventDefault()}>
         <input
-          value={transactions}
-          onChange={(e) => setTransactions(e.target.value)}
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
           type="text"
           placeholder="Search By Stocks"
-          required
-          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-teal-600 focus:outline-none"
         />
       </form>
       <div className="mt-3 overflow-auto rounded-xl border border-slate-300 bg-white">
@@ -46,14 +67,14 @@ export default function TransactionHistory({ transactionHistory = [] }: Transact
             </tr>
           </thead>
           <tbody>
-            {transactionHistory.length === 0 ? (
+            {pageItems.length === 0 ? (
               <tr>
                 <td colSpan={6} className="p-1 text-sm text-center text-slate-500">
                   Tidak ada data transaksi.
                 </td>
               </tr>
             ) : (
-              transactionHistory.map((transaction) => {
+              pageItems.map((transaction) => {
                 const shares = (transaction.stock.lot || 0) * 100
                 const price = transaction.stock?.price || (shares > 0 ? (transaction.amount_done - (transaction.tax || 0)) / shares : 0)
                 return (
@@ -94,6 +115,33 @@ export default function TransactionHistory({ transactionHistory = [] }: Transact
             )}
           </tbody>
         </table>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500">
+        <span>
+          Menampilkan {totalItems === 0 ? 0 : startIndex + 1}&ndash;
+          {Math.min(startIndex + PAGE_SIZE, totalItems)} dari {totalItems} data
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPage(Math.max(1, currentPage - 1))}
+            disabled={currentPage <= 1}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            &larr; Sebelumnya
+          </button>
+          <span className="text-sm text-slate-600">
+            Halaman {currentPage} / {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
+            disabled={currentPage >= totalPages}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Berikutnya &rarr;
+          </button>
+        </div>
       </div>
     </div>
   )

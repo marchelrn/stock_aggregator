@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { formatCurrency } from '../lib/formatters'
 import type { CashMutationData } from '../types'
 
@@ -6,8 +6,15 @@ interface CashMutationHistoryProps {
   cashMutations?: CashMutationData[]
 }
 
+const PAGE_SIZE = 5
+
 export default function CashMutationHistory({ cashMutations = [] }: CashMutationHistoryProps) {
   const [searchTerm, setSearchTerm] = useState('')
+  const [page, setPage] = useState(1)
+
+  useEffect(() => {
+    setPage(1)
+  }, [searchTerm])
 
   const filtered = cashMutations.filter((m) => {
     if (!searchTerm.trim()) return true
@@ -19,6 +26,12 @@ export default function CashMutationHistory({ cashMutations = [] }: CashMutation
       m.description?.toLowerCase().includes(term)
     )
   })
+
+  const totalItems = filtered.length
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const startIndex = (currentPage - 1) * PAGE_SIZE
+  const pageItems = filtered.slice(startIndex, startIndex + PAGE_SIZE)
 
   return (
     <div>
@@ -50,14 +63,14 @@ export default function CashMutationHistory({ cashMutations = [] }: CashMutation
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {pageItems.length === 0 ? (
               <tr>
                 <td colSpan={4} className="p-4 text-sm text-center text-slate-500">
                   Tidak ada data mutasi kas.
                 </td>
               </tr>
             ) : (
-              filtered.map((mutation) => {
+              pageItems.map((mutation) => {
                 const isDeposit = mutation.type === 'DEPOSIT'
                 return (
                   <tr key={mutation.id} className="hover:bg-slate-50/50 transition">
@@ -95,6 +108,33 @@ export default function CashMutationHistory({ cashMutations = [] }: CashMutation
             )}
           </tbody>
         </table>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-500">
+        <span>
+          Menampilkan {totalItems === 0 ? 0 : startIndex + 1}&ndash;
+          {Math.min(startIndex + PAGE_SIZE, totalItems)} dari {totalItems} data
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPage(Math.max(1, currentPage - 1))}
+            disabled={currentPage <= 1}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            &larr; Sebelumnya
+          </button>
+          <span className="text-sm text-slate-600">
+            Halaman {currentPage} / {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
+            disabled={currentPage >= totalPages}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Berikutnya &rarr;
+          </button>
+        </div>
       </div>
     </div>
   )
