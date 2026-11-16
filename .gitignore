@@ -5,3 +5,12 @@ node_modules
 .env
 .env.local
 *.log
+
+# Local agent skills and development notes
+/.opencode/skills/antislop*/
+/anti-slop/
+/AGENTS.md
+/BUG_FIX_SUMMARY.md
+/OPTIMIZATION_REPORT.md
+/RINGKASAN*.md
+/checkpoint/
