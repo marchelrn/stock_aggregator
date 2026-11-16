@@ -1,262 +1,228 @@
-import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronUp, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { X } from 'lucide-react'
 import { usePortfolio } from '../context/PortfolioContext'
-import { formatCurrency } from '../lib/formatters'
-import type { Broker, CashBreakdown } from '../types'
+import { cashInputCaret, formatCashAmount, formatCashInput, formatPastedCash, parseCashAmount } from '../lib/cashInput'
+import type { Broker } from '../types'
 
 interface CashBaseModalProps {
   broker: Broker
   onClose: () => void
 }
 
-/** Format Date → nilai input datetime-local (YYYY-MM-DDTHH:mm). */
-function toLocalInput(d: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-const EVENT_BADGE: Record<string, string> = {
-  BUY: 'bg-rose-100 text-rose-800',
-  SELL: 'bg-emerald-100 text-emerald-800',
-  DEPOSIT: 'bg-emerald-100 text-emerald-800',
-  DIVIDEND: 'bg-teal-100 text-teal-800',
-  WITHDRAW: 'bg-rose-100 text-rose-800',
-}
-
-/**
- * Modal ringkas "Atur Saldo Kas": user menetapkan saldo dasar pada waktu
- * tertentu, lalu cash = saldo dasar + total event setelah waktu itu.
- * Riwayat sebelum cutoff dianggap sudah termuat di saldo dasar.
- */
 export default function CashBaseModal({ broker, onClose }: CashBaseModalProps) {
   const { getCashBreakdown, setBrokerCashBase } = usePortfolio()
-
-  const [cashBase, setCashBase] = useState('')
-  const [asOfLocal, setAsOfLocal] = useState(toLocalInput(new Date()))
-  const [breakdown, setBreakdown] = useState<CashBreakdown | null>(null)
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [cash, setCash] = useState('')
   const [loading, setLoading] = useState(true)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [showEvents, setShowEvents] = useState(false)
+  const [error, setError] = useState('')
+  const [retry, setRetry] = useState(0)
+
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    const opener = document.activeElement
+    dialog.showModal()
+    return () => {
+      dialog.close()
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus()
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    getCashBreakdown(broker.id).then((res) => {
+    setLoadFailed(false)
+    setError('')
+    getCashBreakdown(broker.id).then((result) => {
       if (cancelled) return
-      setBreakdown(res)
-      if (res) {
-        setCashBase(String(res.cash_base ?? 0))
-        setAsOfLocal(res.cash_base_as_of ? toLocalInput(new Date(res.cash_base_as_of)) : toLocalInput(new Date()))
+      if (result) {
+        setCash(formatCashAmount(result.cash))
+      } else {
+        setLoadFailed(true)
+        setError('Saldo belum berhasil dimuat. Coba lagi.')
       }
       setLoading(false)
     })
-    return () => {
-      cancelled = true
-    }
-  }, [broker.id, getCashBreakdown])
+    return () => { cancelled = true }
+  }, [broker.id, getCashBreakdown, retry])
 
-  // Tutup dengan tombol Escape.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+    if (!loading) inputRef.current?.focus()
+  }, [loading])
+
+  const handleSave = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (saving || loading) return
+    const value = parseCashAmount(cash)
+    if (value === null) {
+      setError('Masukkan saldo Rp0 atau lebih.')
+      inputRef.current?.focus()
+      return
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
-  const baseActive = Boolean(breakdown?.cash_base_as_of)
-  const events = breakdown?.events ?? []
-  const eventsTotal = breakdown?.events_total ?? 0
-  const projectedCash = (Number(cashBase) || 0) + eventsTotal
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const baseValue = Number(cashBase)
-    if (Number.isNaN(baseValue) || baseValue < 0) return
+    setError('')
     setSaving(true)
-    const iso = asOfLocal ? new Date(asOfLocal).toISOString() : new Date().toISOString()
-    const res = await setBrokerCashBase(broker.id, baseValue, iso)
-    if (res) setBreakdown(res)
-    setSaving(false)
+    try {
+      const result = await setBrokerCashBase(broker.id, value)
+      if (result) {
+        onClose()
+      } else {
+        setError('Saldo belum tersimpan. Coba lagi.')
+      }
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Atur saldo kas ${broker.name}`}
+    <dialog
+      ref={dialogRef}
+      aria-labelledby="cash-modal-title"
+      aria-describedby="cash-modal-description"
+      onKeyDown={(event) => {
+        if (event.key !== 'Tab') return
+        const controls = event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)')
+        const first = controls[0]
+        const last = controls[controls.length - 1]
+        if (!first) {
+          event.preventDefault()
+        } else if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault()
+          last.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault()
+          first.focus()
+        }
+      }}
+      onCancel={(event) => {
+        event.preventDefault()
+        if (!saving) onClose()
+      }}
+      onClick={(event) => {
+        if (event.target !== event.currentTarget || saving) return
+        const rect = event.currentTarget.getBoundingClientRect()
+        if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose()
+      }}
+      className="fixed m-auto max-h-[calc(100dvh_-_2rem)] w-[calc(100%_-_2rem)] max-w-sm overflow-y-auto rounded-2xl border border-slate-300 bg-white p-5 text-slate-800 shadow-xl backdrop:bg-slate-900/50"
     >
-      <div
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-300 bg-white p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-800">Atur Saldo Kas</h3>
-            <p className="text-sm text-slate-500">
-              {broker.name}
-              {!loading && (
-                <span className="ml-2 text-slate-400">· cash saat ini {formatCurrency(breakdown?.cash ?? broker.cash)}</span>
-              )}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Tutup"
-            className="rounded p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-          >
-            <X size={18} />
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 id="cash-modal-title" className="text-lg font-semibold">Atur saldo kas</h2>
+          <p className="mt-1 break-words text-sm text-slate-600">{broker.name}</p>
+        </div>
+        <button
+          type="button"
+          aria-label="Tutup"
+          onClick={onClose}
+          disabled={saving}
+          className="-mr-2 -mt-2 inline-flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <X size={18} aria-hidden="true" />
+        </button>
+      </div>
+
+      <p id="cash-modal-description" className="mt-4 text-sm leading-relaxed text-slate-600">
+        Isi saldo RDN saat ini. Histori lama tidak mengubah saldo ini.
+      </p>
+
+      {loading ? (
+        <p role="status" className="py-6 text-sm text-slate-600">Memuat saldo...</p>
+      ) : loadFailed ? (
+        <div className="mt-4">
+          <p role="alert" className="text-sm text-rose-700">{error}</p>
+          <button type="button" onClick={() => setRetry((current) => current + 1)}
+            className="mt-2 min-h-11 cursor-pointer rounded-lg border border-slate-300 px-4 text-sm font-semibold hover:bg-slate-50 active:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700">
+            Coba lagi
           </button>
         </div>
-
-        <p className="mt-3 rounded-lg bg-slate-50 p-2.5 text-xs leading-relaxed text-slate-500">
-          Cash = <strong className="text-slate-700">saldo dasar</strong> (is manual, mis. saldo RDN terakhir) +{' '}
-          <strong className="text-slate-700">event setelah waktu dasar</strong>. Riwayat sebelum waktu dasar dianggap
-          sudah termuat di saldo dasar.
-        </p>
-
-        {loading ? (
-          <p className="mt-4 text-sm text-slate-500">Memuat rincian saldo...</p>
-        ) : (
-          <form onSubmit={handleSave}>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="grid gap-1">
-                <label className="text-xs font-semibold text-slate-700" htmlFor="cash-base-amount">
-                  Saldo Dasar (Rp)
-                </label>
-                <input
-                  id="cash-base-amount"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={cashBase}
-                  onChange={(e) => setCashBase(e.target.value)}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-teal-600 focus:outline-none"
-                  placeholder="0"
-                  autoFocus
-                />
-              </div>
-              <div className="grid gap-1">
-                <label className="text-xs font-semibold text-slate-700" htmlFor="cash-base-asof">
-                  Berlaku Sejak
-                </label>
-                <input
-                  id="cash-base-asof"
-                  type="datetime-local"
-                  value={asOfLocal}
-                  onChange={(e) => setAsOfLocal(e.target.value)}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-teal-600 focus:outline-none"
-                />
-              </div>
-            </div>
-
-            {/* Ringkasan: dasar + event = cash */}
-            <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Saldo Dasar</div>
-                <div className="mt-0.5 text-sm font-semibold text-slate-800">
-                  {formatCurrency(Number(cashBase) || 0)}
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                  Event ({events.length})
-                </div>
-                <div
-                  className={`mt-0.5 text-sm font-semibold ${eventsTotal >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}
-                >
-                  {eventsTotal >= 0 ? '+' : '-'}
-                  {formatCurrency(Math.abs(eventsTotal))}
-                </div>
-              </div>
-              <div className="rounded-lg border border-teal-200 bg-teal-50 px-2 py-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-teal-700">Cash</div>
-                <div className="mt-0.5 text-sm font-bold text-teal-800">{formatCurrency(projectedCash)}</div>
-              </div>
-            </div>
-
-            {!baseActive && (
-              <p className="mt-2 text-xs text-amber-700">
-                Belum ada saldo dasar. Cash masih dihitung dari replay seluruh riwayat.
-              </p>
-            )}
-
-            {/* Rincian event (opsional) */}
-            {events.length > 0 && (
-              <div className="mt-3">
-                <button
-                  type="button"
-                  onClick={() => setShowEvents((v) => !v)}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-teal-700 hover:text-teal-800"
-                >
-                  {showEvents ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                  {showEvents ? 'Sembunyikan' : 'Lihat'} event setelah dasar ({events.length})
-                </button>
-                {showEvents && (
-                  <div className="mt-2 max-h-44 overflow-auto rounded-lg border border-slate-200">
-                    <table className="w-full border-collapse text-xs">
-                      <thead className="sticky top-0 bg-slate-50 text-slate-500">
-                        <tr>
-                          <th className="border-b border-slate-200 p-2 text-left font-semibold">Tanggal</th>
-                          <th className="border-b border-slate-200 p-2 text-left font-semibold">Keterangan</th>
-                          <th className="border-b border-slate-200 p-2 text-right font-semibold">Dampak</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {events.map((ev, i) => (
-                          <tr key={`${ev.date}-${i}`} className="hover:bg-slate-50/60">
-                            <td className="border-b border-slate-100 p-2 whitespace-nowrap text-slate-500">
-                              {new Date(ev.date).toLocaleDateString('id-ID')}
-                            </td>
-                            <td className="border-b border-slate-100 p-2">
-                              <span
-                                className={`mr-1.5 rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                                  EVENT_BADGE[ev.type] ?? 'bg-slate-100 text-slate-600'
-                                }`}
-                              >
-                                {ev.type}
-                              </span>
-                              <span className="text-slate-700">{ev.description}</span>
-                            </td>
-                            <td
-                              className={`border-b border-slate-100 p-2 text-right font-mono font-semibold ${
-                                ev.delta >= 0 ? 'text-emerald-700' : 'text-rose-700'
-                              }`}
-                            >
-                              {ev.delta >= 0 ? '+' : '-'}
-                              {formatCurrency(Math.abs(ev.delta))}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="mt-4 flex justify-end gap-2 border-t border-slate-200 pt-3">
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
-              >
-                Batal
-              </button>
-              <button
-                type="submit"
-                disabled={saving}
-                className="rounded-lg bg-teal-700 px-4 py-2 text-xs font-semibold text-white transition hover:bg-teal-800 disabled:opacity-50"
-              >
-                {saving ? 'Menyimpan...' : 'Simpan Saldo Dasar'}
-              </button>
-            </div>
-          </form>
-        )}
-      </div>
-    </div>
+      ) : (
+        <form onSubmit={handleSave} className="mt-5" aria-busy={saving}>
+          <label htmlFor="cash-amount" className="block text-sm font-semibold text-slate-700">Saldo kas saat ini (Rp)</label>
+          <input
+            ref={inputRef}
+            id="cash-amount"
+            type="text"
+            inputMode="decimal"
+            lang="id"
+            autoComplete="off"
+            placeholder="0,00"
+            required
+            value={cash}
+            disabled={saving}
+            onChange={(event) => {
+              const input = event.currentTarget
+              const formatted = formatCashInput(input.value)
+              if (formatted === null) {
+                setError('Gunakan angka dan koma, maksimal 2 desimal.')
+                return
+              }
+              const caret = cashInputCaret(input.value, input.selectionStart ?? input.value.length, formatted)
+              input.value = formatted
+              setCash(formatted)
+              input.setSelectionRange(caret, caret)
+              setError('')
+            }}
+            onKeyDown={(event) => {
+              const input = event.currentTarget
+              const start = input.selectionStart ?? 0
+              if (start !== input.selectionEnd) return
+              const backward = event.key === 'Backspace' && start > 0 && cash[start - 1] === '.'
+              const forward = event.key === 'Delete' && cash[start] === '.'
+              if (!backward && !forward) return
+              event.preventDefault()
+              const from = backward ? start - 2 : start
+              const next = cash.slice(0, from) + cash.slice(from + 2)
+              const formatted = formatCashInput(next)
+              if (formatted === null) return
+              const caret = cashInputCaret(next, from, formatted)
+              input.value = formatted
+              setCash(formatted)
+              input.setSelectionRange(caret, caret)
+              setError('')
+            }}
+            onPaste={(event) => {
+              event.preventDefault()
+              const input = event.currentTarget
+              const pasted = formatPastedCash(event.clipboardData.getData('text'))
+              if (pasted === null) {
+                setError('Nominal tidak valid. Contoh: 1.500.000,50.')
+                return
+              }
+              const next = cash.slice(0, input.selectionStart ?? 0) + pasted + cash.slice(input.selectionEnd ?? cash.length)
+              const formatted = formatCashInput(next)
+              if (formatted === null) {
+                setError('Gunakan angka dan koma, maksimal 2 desimal.')
+                return
+              }
+              const caret = cashInputCaret(next, (input.selectionStart ?? 0) + pasted.length, formatted)
+              input.value = formatted
+              setCash(formatted)
+              input.setSelectionRange(caret, caret)
+              setError('')
+            }}
+            onBlur={() => {
+              const value = parseCashAmount(cash)
+              if (value !== null) setCash(formatCashAmount(value))
+            }}
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? 'cash-error' : undefined}
+            className="mt-2 min-h-11 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-base tabular-nums focus:border-teal-700 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-teal-700 disabled:cursor-not-allowed disabled:bg-slate-50"
+          />
+          {error && <p id="cash-error" role="alert" className="mt-2 text-sm text-rose-700">{error}</p>}
+          <div className="mt-6 flex justify-end gap-2">
+            <button type="button" onClick={onClose} disabled={saving}
+              className="min-h-11 cursor-pointer rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 active:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:opacity-50">
+              Batal
+            </button>
+            <button type="submit" disabled={saving}
+              className="min-h-11 cursor-pointer rounded-lg bg-teal-700 px-4 text-sm font-semibold text-white hover:bg-teal-800 active:bg-teal-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:opacity-50">
+              {saving ? 'Menyimpan...' : 'Simpan'}
+            </button>
+          </div>
+        </form>
+      )}
+    </dialog>
   )
 }

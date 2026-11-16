@@ -65,7 +65,6 @@ interface PortfolioContextValue {
   setBrokerCashBase: (
     brokerId: number,
     cashBase: number,
-    cashBaseAsOf: string,
   ) => Promise<CashBreakdown | null>
 }
 
@@ -412,7 +411,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     }
   }, [setStatus])
 
-  // Rincian saldo kas: cash_base + event setelah cutoff = cash.
+
   const getCashBreakdown = useCallback(
     async (brokerId: number): Promise<CashBreakdown | null> => {
       try {
@@ -427,13 +426,13 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   )
 
   const setBrokerCashBase = useCallback(
-    async (brokerId: number, cashBase: number, cashBaseAsOf: string): Promise<CashBreakdown | null> => {
+    async (brokerId: number, cashBase: number): Promise<CashBreakdown | null> => {
       try {
         const res = await api<CashBreakdownResponse>(`/broker/${brokerId}/cash-base`, {
           method: 'PUT',
-          body: JSON.stringify({ cash_base: cashBase, cash_base_as_of: cashBaseAsOf }),
+          body: JSON.stringify({ cash_base: cashBase }),
         })
-        setStatus('Saldo dasar disimpan.')
+        setStatus('Saldo kas disimpan.')
         await loadDashboard({ silent: true })
         return res.data ?? null
       } catch (error) {

@@ -4,9 +4,9 @@ export interface Broker {
   id: number
   name: string
   cash: number
-  /** Saldo dasar yang di-set manual; cash = cash_base + event setelah cutoff. */
+  /** Saldo acuan dari pengaturan manual terakhir. */
   cash_base?: number
-  /** Waktu berlakunya saldo dasar (cutoff). null = mode replay penuh. */
+  /** Batas aktivitas kas, tidak boleh mendahului waktu pendaftaran. */
   cash_base_as_of?: string | null
 }
 
