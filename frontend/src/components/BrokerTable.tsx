@@ -25,12 +25,18 @@ export default function BrokerTable({
       <table className="w-full min-w-[560px] border-collapse">
         <thead>
           <tr className="bg-slate-50 text-slate-500">
-            <th className="border-b border-slate-300 p-2 text-center text-xs">No</th>
-            <th className="border-b border-slate-300 p-2 text-center text-xs">Name</th>
-            <th className="border-b border-slate-300 p-2 text-center text-xs">Cash</th>
-            <th className="border-b border-slate-300 p-2 text-center text-xs">Broker's Allocations (%)</th>
-            <th className="border-b border-slate-300 p-2 text-center text-xs">View Holdings</th>
-            <th className="border-b border-slate-300 p-2 text-center text-xs">Disconnect</th>
+            <th className="w-[5%] border-b border-slate-300 p-1 text-center text-xs">No</th>
+            <th className="w-[20%] border-b border-slate-300 p-1 text-center text-xs">Name</th>
+            <th className="w-[14%] border-b border-slate-300 p-1 pr-7 text-right text-xs">
+              Cash
+            </th>
+            <th className="w-[18%] border-b border-slate-300 p-1 text-right text-xs">
+              <div className='w-full text-right'>
+                Broker's Allocations (%)
+              </div>
+            </th>
+            <th className="w-[19%] border-b border-slate-300 p-1 text-center text-xs">View Holdings</th>
+            <th className="w-[14%] border-b border-slate-300 p-1 text-center text-xs">Disconnect</th>
           </tr>
         </thead>
         <tbody>
@@ -43,28 +49,31 @@ export default function BrokerTable({
           ) : (
             brokers.map((broker, index) => (
               <tr key={broker.id}>
-                <td className="border-b border-slate-100 p-2 text-sm text-center">
+                <td className="border-b border-slate-100 p-1 text-sm text-center">
                   <code>{index + 1}</code>
                 </td>
-                <td className="border-b border-slate-100 p-2 text-sm text-center">{broker.name}</td>
-                <td className="border-b border-slate-100 p-2 text-sm text-center">
-                  <span className="inline-flex items-center gap-1.5">
+                <td className="border-b border-slate-100 p-1 text-sm text-center">{broker.name}</td>
+                <td className="relative border-b border-slate-100 p-1 pr-7 text-sm">
+                  <div className="w-full text-right tabular-nums">
                     {formatCurrency(broker.cash)}
-                    <button
-                      type="button"
-                      onClick={() => onEditCash?.(broker)}
-                      aria-label={`Atur saldo kas ${broker.name}`}
-                      title="Atur saldo dasar kas"
-                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-slate-400 transition hover:bg-teal-50 hover:text-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-300"
-                    >
-                      <Pencil size={13} />
-                    </button>
-                  </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => onEditCash?.(broker)}
+                    aria-label={`Atur saldo kas ${broker.name}`}
+                    title="Atur saldo kas"
+                    className="absolute right-0 top-1/2 inline-flex h-7 w-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md"
+                  >
+                    <Pencil size={13} aria-hidden="true" />
+                  </button>
                 </td>
-                <td className="border-b border-slate-100 p-2 text-sm text-center">
-                  {formatNumber(allocations[broker.id] ?? 0, 1)}%
+                <td className="border-b border-slate-100 p-1 text-sm">
+                  <div className="w-full text-right tabular-nums">
+                    {formatNumber(allocations[broker.id] ?? 0, 1)}%
+                  </div>
                 </td>
-                <td className="border-b border-slate-100 p-2 text-sm text-center">
+                <td className="border-b border-slate-100 p-1 text-sm text-center">
                   <label className={`relative inline-flex cursor-pointer items-center ${isOnlyBroker ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
                     <input
                       type="checkbox"
@@ -76,7 +85,7 @@ export default function BrokerTable({
                     <div className="peer h-5 w-9 rounded-full bg-slate-200 after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-slate-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-teal-600 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-teal-300"></div>
                   </label>
                 </td>
-                <td className="border-b border-slate-100 p-2 text-center">
+                <td className="border-b border-slate-100 p-1 text-center">
                   <button
                     type="button"
                     onClick={() => onRemove?.(broker)}
