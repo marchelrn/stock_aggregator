@@ -5,7 +5,9 @@ import (
 	"time"
 )
 
-// PDFParsingTemplate stores a versioned, independently editable PDF layout.
+// PDFParsingTemplate stores a versioned, independently editable parsing layout.
+// Despite the table name, schema version 2 templates can also describe cash and
+// dividend emails, not only PDF trade confirmations.
 type PDFParsingTemplate struct {
 	ID              uint            `json:"id" gorm:"primaryKey"`
 	Key             string          `json:"key" gorm:"not null;uniqueIndex:idx_pdf_template_key_version"`

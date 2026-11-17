@@ -10,6 +10,7 @@ import (
 	"net/mail"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/marchelrn/stock_api/config"
@@ -49,10 +50,44 @@ type emailSelectorProvider interface {
 	EmailSelectors(context.Context) ([]parser.EmailMetadata, error)
 }
 
+type cashParserProvider interface {
+	CashParser(context.Context) (*parser.CashEmailParser, error)
+}
+
+func (s *GmailServiceImpl) cashParserSnapshot(ctx context.Context) (*parser.CashEmailParser, error) {
+	provider, ok := s.TradeParser.(cashParserProvider)
+	if !ok {
+		return nil, errors.New("metadata cash parser is not configured")
+	}
+	return provider.CashParser(ctx)
+}
+
+// emailKindSelectorProvider is optional. When available, discovery asks for
+// selectors per email kind from the database instead of mixing trade with cash.
+type emailKindSelectorProvider interface {
+	EmailSelectorsForKinds(context.Context, ...string) ([]parser.EmailMetadata, error)
+}
+
+// selectorsForKinds prefers the kind-aware provider and falls back to the
+// legacy provider for injected parsers.
+func (s *GmailServiceImpl) selectorsForKinds(ctx context.Context, kinds ...string) ([]parser.EmailMetadata, bool, error) {
+	if provider, ok := s.TradeParser.(emailKindSelectorProvider); ok {
+		selectors, err := provider.EmailSelectorsForKinds(ctx, kinds...)
+		return selectors, true, err
+	}
+	if provider, ok := s.TradeParser.(emailSelectorProvider); ok {
+		selectors, err := provider.EmailSelectors(ctx)
+		return selectors, true, err
+	}
+	return nil, false, nil
+}
+
 const gmailSyncTimeout = 5 * time.Minute
 
 // v2 ignores legacy markers written before persistence or for skipped PDFs.
 const tradeConfirmationCacheType = "trade_confirmation:v2"
+
+const cashMutationCacheType = "cash_mutation:v2"
 
 func ImplGmailService(authRepo contract.AuthRepository, parser TradeConfirmationParser, txRepo contract.TransactionRepository, cashRepo contract.CashMutationRepository, brokerRepo contract.BrokerRepository, cacheRepo contract.GmailCacheRepository) contract.GmailService {
 	return &GmailServiceImpl{
@@ -63,6 +98,68 @@ func ImplGmailService(authRepo contract.AuthRepository, parser TradeConfirmation
 		BrokerRepo:       brokerRepo,
 		GmailCacheRepo:   cacheRepo,
 	}
+}
+
+// registeredBrokerNames mengembalikan nama broker milik user dalam huruf kecil.
+// Flag kedua menandakan filter tersedia; kalau repo gagal dibaca, sync tidak
+// boleh diam-diam menyimpan transaksi dengan broker_id 0.
+func (s *GmailServiceImpl) registeredBrokerNames(userID uint) (map[string]bool, bool) {
+	if s.BrokerRepo == nil {
+		return nil, false
+	}
+	brokers, err := s.BrokerRepo.GetAllBrokers(userID)
+	if err != nil {
+		log.Printf("Warning: gagal memuat broker user %d: %v", userID, err)
+		return nil, false
+	}
+	names := make(map[string]bool, len(brokers))
+	for _, broker := range brokers {
+		names[strings.ToLower(strings.TrimSpace(broker.Name))] = true
+	}
+	return names, true
+}
+
+// filterRegisteredTrades membuang hasil parse dari broker yang tidak
+// didaftarkan user, supaya riwayat hanya berisi broker miliknya.
+func (s *GmailServiceImpl) filterRegisteredTrades(userID uint, trades []dto.ParsedTrade) []dto.ParsedTrade {
+	names, ok := s.registeredBrokerNames(userID)
+	if !ok {
+		return trades
+	}
+	kept := make([]dto.ParsedTrade, 0, len(trades))
+	skipped := 0
+	for _, trade := range trades {
+		if names[strings.ToLower(strings.TrimSpace(trade.BrokerName))] {
+			kept = append(kept, trade)
+			continue
+		}
+		skipped++
+	}
+	if skipped > 0 {
+		log.Printf("Melewati %d transaksi dari broker yang belum didaftarkan user %d", skipped, userID)
+	}
+	return kept
+}
+
+// filterRegisteredMutations melakukan hal yang sama untuk mutasi kas.
+func (s *GmailServiceImpl) filterRegisteredMutations(userID uint, mutations []dto.ParsedCashMutation) []dto.ParsedCashMutation {
+	names, ok := s.registeredBrokerNames(userID)
+	if !ok {
+		return mutations
+	}
+	kept := make([]dto.ParsedCashMutation, 0, len(mutations))
+	skipped := 0
+	for _, mutation := range mutations {
+		if names[strings.ToLower(strings.TrimSpace(mutation.BrokerName))] {
+			kept = append(kept, mutation)
+			continue
+		}
+		skipped++
+	}
+	if skipped > 0 {
+		log.Printf("Melewati %d mutasi kas dari broker yang belum didaftarkan user %d", skipped, userID)
+	}
+	return kept
 }
 
 // convertParsedTradeToTransaction converts a parsed trade from email to a transaction model
@@ -323,6 +420,8 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 		return nil, err
 	}
 
+	allTrades = s.filterRegisteredTrades(user.Id, allTrades)
+
 	// Save parsed trades to database
 	var syncedCount int
 	if s.TransactionRepo != nil && len(allTrades) > 0 {
@@ -452,6 +551,10 @@ func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmai
 	if user.CreatedAt.IsZero() {
 		return nil, fmt.Errorf("user registration time is required for cash sync")
 	}
+	cashParser, err := s.cashParserSnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
 	// Cash history is not imported. Keep this independent of the trade
 	// checkpoint and use epoch seconds rather than Gmail's day-only cutoff.
 	query, err := s.cashMutationQuery(ctx, nil)
@@ -459,36 +562,81 @@ func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmai
 		return nil, err
 	}
 	query += fmt.Sprintf(" after:%d", user.CreatedAt.Unix())
+	processedIDs := make(map[string]bool)
+	if s.GmailCacheRepo != nil {
+		cached, err := s.GmailCacheRepo.GetProcessedMessageIDs(ctx, user.Id, cashMutationCacheType)
+		if err != nil {
+			log.Printf("Warning: failed to load cash Gmail cache: %v", err)
+		} else {
+			processedIDs = cached
+		}
+	}
+	registered, filterAvailable := s.registeredBrokerNames(user.Id)
+	if s.BrokerRepo != nil && !filterAvailable {
+		return nil, errors.New("failed to load registered brokers for cash sync")
+	}
 	var allMutations []dto.ParsedCashMutation
 	var emailCount int
+	var syncedCount int
 	pageToken := ""
 	for {
 		messages, err := gmailSrv.Users.Messages.List("me").Q(query).MaxResults(50).PageToken(pageToken).Context(ctx).Do()
 		if err != nil {
 			return nil, fmt.Errorf("search Gmail messages: %w", err)
 		}
+		uncached := make([]*gmail.Message, 0, len(messages.Messages))
 		for _, msg := range messages.Messages {
 			if msg == nil || msg.Id == "" {
-				return nil, fmt.Errorf("Gmail search returned a message without an ID")
+				return nil, errors.New("Gmail search returned a message without an ID")
 			}
-			fullMsg, err := gmailSrv.Users.Messages.Get("me", msg.Id).Format("full").Context(ctx).Do()
+			if !processedIDs[msg.Id] {
+				uncached = append(uncached, msg)
+			}
+		}
+		fullMessages, err := fetchCashMessages(ctx, gmailSrv, uncached)
+		if err != nil {
+			return nil, err
+		}
+		var pageMutations []dto.ParsedCashMutation
+		pendingMessages := make(map[string]int)
+		for _, fullMsg := range fullMessages {
+			mutations, err := s.processCashMessageWithParser(ctx, gmailSrv, fullMsg, cashParser)
 			if err != nil {
-				return nil, fmt.Errorf("get Gmail message %s: %w", msg.Id, err)
+				return nil, fmt.Errorf("process Gmail message %s: %w", fullMsg.Id, err)
 			}
-			mutations, err := s.processCashMessage(ctx, gmailSrv, fullMsg)
-			if err != nil {
-				return nil, fmt.Errorf("process Gmail message %s: %w", msg.Id, err)
-			}
+			kept := 0
 			for _, mutation := range mutations {
 				date, err := time.Parse("2006-01-02", mutation.Date)
 				if err != nil {
 					return nil, fmt.Errorf("invalid cash mutation date %q: %w", mutation.Date, err)
 				}
-				if date.After(user.CreatedAt) {
-					allMutations = append(allMutations, mutation)
+				if date.After(user.CreatedAt) && (!filterAvailable || registered[strings.ToLower(strings.TrimSpace(mutation.BrokerName))]) {
+					pageMutations = append(pageMutations, mutation)
+					kept++
 				}
 			}
+			if kept > 0 && kept == len(mutations) {
+				pendingMessages[fullMsg.Id] = kept
+			}
 			emailCount++
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		count, err := s.persistCashMutations(user.Id, pageMutations)
+		if err != nil {
+			return nil, err
+		}
+		syncedCount += count
+		allMutations = append(allMutations, pageMutations...)
+		if s.CashMutationRepo != nil && s.GmailCacheRepo != nil && filterAvailable {
+			for messageID, count := range pendingMessages {
+				if err := s.GmailCacheRepo.MarkProcessed(ctx, user.Id, messageID, cashMutationCacheType, count); err != nil {
+					log.Printf("Warning: failed to cache persisted cash message %s: %v", messageID, err)
+					continue
+				}
+				processedIDs[messageID] = true
+			}
 		}
 		pageToken = messages.NextPageToken
 		if pageToken == "" {
@@ -498,44 +646,6 @@ func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmai
 
 	if err := ctx.Err(); err != nil {
 		return nil, err
-	}
-
-	// Save parsed mutations to database
-	var syncedCount int
-	if s.CashMutationRepo != nil && len(allMutations) > 0 {
-		var mutationReqs []*models.CashMutation
-		for _, mutation := range allMutations {
-			var brokerID int
-			if s.BrokerRepo != nil && mutation.BrokerName != "" {
-				broker, err := s.BrokerRepo.GetBrokerByName(user.Id, mutation.BrokerName)
-				if err == nil && broker != nil {
-					brokerID = broker.ID
-				}
-			}
-
-			date, err := time.Parse("2006-01-02", mutation.Date)
-			if err != nil {
-				return nil, fmt.Errorf("invalid cash mutation date %q: %w", mutation.Date, err)
-			}
-
-			mutationReqs = append(mutationReqs, &models.CashMutation{
-				UserID:          user.Id,
-				BrokerID:        brokerID,
-				BrokerName:      mutation.BrokerName,
-				Type:            models.CashMutationType(mutation.Type),
-				Amount:          mutation.Amount,
-				Date:            date,
-				EmailReceivedAt: mutation.EmailReceivedAt,
-				Description:     mutation.Description,
-				RefNo:           mutation.RefNo,
-			})
-		}
-
-		synced, err := s.CashMutationRepo.SyncCashMutationBatch(user.Id, mutationReqs)
-		if err != nil {
-			return nil, fmt.Errorf("sync cash mutation batch: %w", err)
-		}
-		syncedCount = synced
 	}
 
 	// Do not touch LastGmailSyncAt here: it is the trade-confirmation
@@ -557,64 +667,132 @@ func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmai
 	}, nil
 }
 
-// buildCashMutationQuery builds a Gmail search query for cash mutation emails
-// Cash mutations are text/HTML body emails, not PDF attachments
-func buildCashMutationQuery(lastSyncAt *time.Time) string {
-	parts := []string{
-		`subject:("deposit" OR "penarikan" OR "withdrawal" OR "top up" OR "mutasi kas" OR "pembagian dividen tunai" OR "pembayaran dividen tunai")`,
+func (s *GmailServiceImpl) persistCashMutations(userID uint, mutations []dto.ParsedCashMutation) (int, error) {
+	if s.CashMutationRepo == nil || len(mutations) == 0 {
+		return 0, nil
 	}
-
-	if lastSyncAt != nil {
-		safeDate := lastSyncAt.AddDate(0, 0, -1)
-		parts = append(parts, fmt.Sprintf("after:%s", safeDate.Format("2006/01/02")))
+	requests := make([]*models.CashMutation, 0, len(mutations))
+	for _, mutation := range mutations {
+		var brokerID int
+		if s.BrokerRepo != nil {
+			broker, err := s.BrokerRepo.GetBrokerByName(userID, mutation.BrokerName)
+			if err != nil {
+				return 0, fmt.Errorf("load broker for cash mutation: %w", err)
+			}
+			if broker == nil {
+				return 0, errors.New("broker for cash mutation not found")
+			}
+			brokerID = broker.ID
+		}
+		date, err := time.Parse("2006-01-02", mutation.Date)
+		if err != nil {
+			return 0, fmt.Errorf("invalid cash mutation date %q: %w", mutation.Date, err)
+		}
+		requests = append(requests, &models.CashMutation{
+			UserID: userID, BrokerID: brokerID, BrokerName: mutation.BrokerName,
+			Type: models.CashMutationType(mutation.Type), Amount: mutation.Amount,
+			Date: date, EmailReceivedAt: mutation.EmailReceivedAt,
+			Description: mutation.Description, RefNo: mutation.RefNo,
+		})
 	}
+	count, err := s.CashMutationRepo.SyncCashMutationBatch(userID, requests)
+	if err != nil {
+		return 0, fmt.Errorf("sync cash mutation batch: %w", err)
+	}
+	return count, nil
+}
 
-	return strings.Join(parts, " ")
+func fetchCashMessages(ctx context.Context, gmailSrv *gmail.Service, messages []*gmail.Message) ([]*gmail.Message, error) {
+	for _, message := range messages {
+		if message == nil || message.Id == "" {
+			return nil, errors.New("Gmail search returned a message without an ID")
+		}
+	}
+	full := make([]*gmail.Message, len(messages))
+	failures := make([]error, len(messages))
+	var workers sync.WaitGroup
+	const concurrency = 4
+	for worker := 0; worker < concurrency && worker < len(messages); worker++ {
+		workers.Add(1)
+		go func(start int) {
+			defer workers.Done()
+			for i := start; i < len(messages); i += concurrency {
+				message, err := gmailSrv.Users.Messages.Get("me", messages[i].Id).Format("full").Context(ctx).Do()
+				if err != nil {
+					failures[i] = fmt.Errorf("get Gmail message %s: %w", messages[i].Id, err)
+					return
+				}
+				full[i] = message
+			}
+		}(worker)
+	}
+	workers.Wait()
+	for _, err := range failures {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return full, nil
 }
 
 func (s *GmailServiceImpl) cashMutationQuery(ctx context.Context, lastSyncAt *time.Time) (string, error) {
-	query := buildCashMutationQuery(lastSyncAt)
-	provider, ok := s.TradeParser.(emailSelectorProvider)
-	if !ok {
-		// No email selector provider, proceed with basic query
-		return query, nil
-	}
-	selectors, err := provider.EmailSelectors(ctx)
+	selectors, available, err := s.selectorsForKinds(ctx, parser.KindCash, parser.KindDividend)
 	if err != nil {
-		// If there's an error loading selectors, proceed with basic query
-		log.Printf("Warning: failed to load email selectors for cash mutations: %v", err)
-		return query, nil
+		return "", fmt.Errorf("load cash email selectors: %w", err)
 	}
-	if len(selectors) == 0 {
-		// No active selectors, proceed with basic query (don't filter by sender)
-		return query, nil
+	if !available || len(selectors) == 0 {
+		return "", errors.New("no active cash email selectors")
 	}
 
-	var senders []string
+	var terms []string
 	seen := make(map[string]bool)
 	for _, selector := range selectors {
-		if selector.From == "" {
-			continue
+		var parts []string
+		if selector.FromDomain != "" {
+			if !parser.ValidSenderDomain(selector.FromDomain) {
+				return "", errors.New("invalid Gmail selector domain")
+			}
+			parts = append(parts, fmt.Sprintf("from:\"%s\"", selector.FromDomain))
 		}
-		address, err := mail.ParseAddress(selector.From)
-		if err != nil || address.Address != selector.From || strings.ContainsAny(selector.From, "\r\n\"\\") {
-			log.Printf("Warning: invalid Gmail selector sender %q: %v", selector.From, err)
-			continue
+		if selector.From != "" {
+			address, err := mail.ParseAddress(selector.From)
+			if err != nil || address.Address != selector.From || strings.ContainsAny(selector.From, "\r\n\"\\") {
+				return "", errors.New("invalid Gmail selector sender")
+			}
+			parts = append(parts, fmt.Sprintf("from:\"%s\"", selector.From))
 		}
-		key := strings.ToLower(selector.From)
-		if !seen[key] {
-			senders = append(senders, fmt.Sprintf("from:\"%s\"", selector.From))
-			seen[key] = true
+		if selector.Subject != "" {
+			if strings.ContainsAny(selector.Subject, "\r\n\"\\") {
+				return "", errors.New("invalid Gmail selector subject")
+			}
+			parts = append(parts, fmt.Sprintf("subject:\"%s\"", selector.Subject))
+		}
+		if len(parts) == 0 {
+			return "", errors.New("cash discovery requires a sender or subject selector")
+		}
+		term := "(" + strings.Join(parts, " ") + ")"
+		if !seen[term] {
+			terms = append(terms, term)
+			seen[term] = true
 		}
 	}
-	if len(senders) > 0 {
-		query += " {" + strings.Join(senders, " ") + "}"
+	query := "{" + strings.Join(terms, " ") + "}"
+	if lastSyncAt != nil {
+		query += " after:" + lastSyncAt.AddDate(0, 0, -1).Format("2006/01/02")
 	}
 	return query, nil
 }
 
 // processCashMessage processes a Gmail message for cash mutation emails (text/HTML body, not PDF)
 func (s *GmailServiceImpl) processCashMessage(ctx context.Context, gmailSrv *gmail.Service, msg *gmail.Message) ([]dto.ParsedCashMutation, error) {
+	cashParser, err := s.cashParserSnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.processCashMessageWithParser(ctx, gmailSrv, msg, cashParser)
+}
+
+func (s *GmailServiceImpl) processCashMessageWithParser(ctx context.Context, gmailSrv *gmail.Service, msg *gmail.Message, cashParser *parser.CashEmailParser) ([]dto.ParsedCashMutation, error) {
 	if msg == nil || msg.Payload == nil {
 		return nil, fmt.Errorf("Gmail message has no MIME payload")
 	}
@@ -633,6 +811,7 @@ func (s *GmailServiceImpl) processCashMessage(ctx context.Context, gmailSrv *gma
 	}
 
 	var mutations []dto.ParsedCashMutation
+	var missingAmount error
 	var visit func(*gmail.MessagePart) error
 	visit = func(part *gmail.MessagePart) error {
 		if err := ctx.Err(); err != nil {
@@ -643,6 +822,9 @@ func (s *GmailServiceImpl) processCashMessage(ctx context.Context, gmailSrv *gma
 		}
 		// Process text/plain and text/html parts for cash mutations
 		if strings.EqualFold(part.MimeType, "text/plain") || strings.EqualFold(part.MimeType, "text/html") {
+			if part.Filename != "" || part.Body == nil {
+				return nil
+			}
 			data := part.Body.Data
 			if data == "" && part.Body.AttachmentId != "" {
 				attachment, err := gmailSrv.Users.Messages.Attachments.Get("me", msg.Id, part.Body.AttachmentId).Context(ctx).Do()
@@ -662,11 +844,25 @@ func (s *GmailServiceImpl) processCashMessage(ctx context.Context, gmailSrv *gma
 				return fmt.Errorf("decode part %q: %w", part.Filename, err)
 			}
 			body := string(bodyBytes)
-			parsed, err := parser.ParseCashEmail(meta.From, meta.Subject, emailDate, body)
-			if err != nil {
+			parsed, err := cashParser.Parse(ctx, meta, emailDate, body)
+			if errors.Is(err, parser.ErrCashAmountNotFound) {
+				missingAmount = err
+			} else if err != nil {
 				return fmt.Errorf("parse cash email: %w", err)
 			}
 			if parsed != nil {
+				// multipart/alternative usually repeats the same event as HTML
+				// and plain text. Never persist it twice or accept conflicting
+				// representations of the same message.
+				if len(mutations) > 0 {
+					prior := mutations[0]
+					if prior.BrokerName != parsed.BrokerName || prior.Type != string(parsed.Type) ||
+						prior.Amount != parsed.Amount || prior.Date != parsed.Date.Format("2006-01-02") ||
+						prior.RefNo != parsed.RefNo || prior.Description != parsed.Description {
+						return errors.New("conflicting cash values across email MIME parts")
+					}
+					return nil
+				}
 				receivedAt := emailDate
 				mutations = append(mutations, dto.ParsedCashMutation{
 					BrokerName:      parsed.BrokerName,
@@ -689,6 +885,9 @@ func (s *GmailServiceImpl) processCashMessage(ctx context.Context, gmailSrv *gma
 
 	if err := visit(msg.Payload); err != nil {
 		return nil, err
+	}
+	if len(mutations) == 0 && missingAmount != nil {
+		return nil, fmt.Errorf("parse cash email: no MIME body contains a readable amount: %w", missingAmount)
 	}
 	return mutations, nil
 }
@@ -713,11 +912,10 @@ func buildTradeConfirmationQuery(lastSyncAt *time.Time) string {
 
 func (s *GmailServiceImpl) tradeConfirmationQuery(ctx context.Context, lastSyncAt *time.Time) (string, error) {
 	query := buildTradeConfirmationQuery(lastSyncAt)
-	provider, ok := s.TradeParser.(emailSelectorProvider)
-	if !ok {
+	selectors, available, err := s.selectorsForKinds(ctx, parser.KindTrade)
+	if !available {
 		return query, nil
 	}
-	selectors, err := provider.EmailSelectors(ctx)
 	if err != nil {
 		return "", fmt.Errorf("load Gmail email selectors: %w", err)
 	}

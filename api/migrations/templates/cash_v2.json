@@ -1,0 +1,138 @@
+[
+  {
+    "key": "cash.stockbit.deposit",
+    "broker_name": "Stockbit Sekuritas",
+    "version": 1,
+    "config": {
+      "schema_version": 2,
+      "document": "email_body",
+      "kind": "cash",
+      "sender_domain": "stockbit.com",
+      "subject_pattern": "(?i)^deposit kamu sudah masuk[.!]?\\s*$",
+      "numbers": {"decimal_separator": ".", "thousands_separator": ",", "grouping_size": 3},
+      "email": {
+        "type": "deposit",
+        "amount_pattern": "(?i)(?:deposit|dana\\s+masuk).*?sebesar\\s*(?:idr|rp)?\\s*([\\d,.]+)",
+        "amount_group": 1,
+        "description": "Deposit Stockbit Sekuritas"
+      }
+    }
+  },
+  {
+    "key": "cash.stockbit.withdraw",
+    "broker_name": "Stockbit Sekuritas",
+    "version": 1,
+    "config": {
+      "schema_version": 2,
+      "document": "email_body",
+      "kind": "cash",
+      "sender_domain": "stockbit.com",
+      "subject_pattern": "(?i)(penarikan|tarik dana|withdrawal)",
+      "numbers": {"decimal_separator": ".", "thousands_separator": ",", "grouping_size": 3},
+      "email": {
+        "type": "withdraw",
+        "amount_pattern": "(?i)(?:jumlah\\s*:\\s*|(?:penarikan|tarik\\s+dana).*?sebesar\\s*)(?:IDR|Rp)?\\s*([\\d,.]+)",
+        "amount_group": 1,
+        "ref_pattern": "(?i)nomor\\s+referensi\\s*:\\s*([0-9a-zA-Z]+)",
+        "ref_group": 1,
+        "description": "Penarikan Dana Stockbit Sekuritas"
+      }
+    }
+  },
+  {
+    "key": "cash.trimegah.deposit",
+    "broker_name": "Trimegah Sekuritas",
+    "version": 1,
+    "config": {
+      "schema_version": 2,
+      "document": "email_body",
+      "kind": "cash",
+      "sender_domain": "trimegah.com",
+      "subject_pattern": "(?i)(top up|deposit)",
+      "numbers": {"decimal_separator": ".", "thousands_separator": ",", "grouping_size": 3},
+      "email": {
+        "type": "deposit",
+        "amount_pattern": "(?i)(?:top\\s+up\\s+rdn|deposit).*?sebesar\\s*rp\\s*([\\d,.]+)",
+        "amount_group": 1,
+        "description": "Top Up RDN Trimegah Sekuritas"
+      }
+    }
+  },
+  {
+    "key": "cash.trimegah.withdraw",
+    "broker_name": "Trimegah Sekuritas",
+    "version": 1,
+    "config": {
+      "schema_version": 2,
+      "document": "email_body",
+      "kind": "cash",
+      "sender_domain": "trimegah.com",
+      "subject_pattern": "(?i)^(tarik dana|penarikan|withdrawal)",
+      "numbers": {"decimal_separator": ".", "thousands_separator": ",", "grouping_size": 3},
+      "email": {
+        "type": "withdraw",
+        "amount_pattern": "(?i)(?:penarikan|tarik)\\s+dana.*?sebesar\\s*rp\\s*([\\d,.]+)",
+        "amount_group": 1,
+        "description": "Penarikan Dana Trimegah Sekuritas"
+      }
+    }
+  },
+  {
+    "key": "cash.stockbit.dividend",
+    "broker_name": "Stockbit Sekuritas",
+    "version": 1,
+    "config": {
+      "schema_version": 2,
+      "document": "email_body",
+      "kind": "dividend",
+      "sender_domain": "stockbit.com",
+      "subject_pattern": "(?i)^pembagian dividen tunai",
+      "numbers": {"decimal_separator": ".", "thousands_separator": ",", "grouping_size": 3},
+      "email": {
+        "type": "dividend",
+        "amount_pattern": "(?i)dividen\\s+bersih(?:\\s*\\(?rp\\)?)?\\s*([\\d,.]+)",
+        "amount_group": 1,
+        "date_pattern": "(?i)tanggal\\s+pembayaran\\s*(\\d{4}-\\d{2}-\\d{2})",
+        "date_group": 1,
+        "date_layout": "2006-01-02",
+        "ticker_pattern": "(?i)^pembagian dividen tunai\\s+([a-z]{3,6})\\b",
+        "ticker_group": 1,
+        "ticker_source": "subject",
+        "description": "Dividen Tunai {ticker}"
+      },
+      "ref_template": "DIV-{ticker}-{paydate}"
+    }
+  },
+  {
+    "key": "cash.mandiri.dividend",
+    "broker_name": "Mandiri Sekuritas",
+    "version": 1,
+    "config": {
+      "schema_version": 2,
+      "document": "email_body",
+      "kind": "dividend",
+      "sender_domain": "mandirisekuritas.co.id",
+      "subject_pattern": "(?i)pembayaran dividen tunai",
+      "numbers": {"decimal_separator": ".", "thousands_separator": ",", "grouping_size": 3},
+      "email": {
+        "type": "dividend",
+        "amount_pattern": "(?i)dividen\\s+bersih(?:\\s*\\(?rp\\)?)?\\s*([\\d,.]+)",
+        "amount_group": 1,
+        "date_pattern": "(?i)pada\\s+tanggal\\s*(\\d{1,2}\\s+[a-z]+\\s+\\d{4})",
+        "date_group": 1,
+        "date_layout": "2 January 2006",
+        "date_replacements": {
+          "januari": "January", "februari": "February", "maret": "March",
+          "april": "April", "mei": "May", "juni": "June", "juli": "July",
+          "agustus": "August", "september": "September", "oktober": "October",
+          "november": "November", "desember": "December"
+        },
+        "ticker_pattern": "\\(([A-Za-z]{4})\\)",
+        "ticker_group": 1,
+        "ticker_source": "subject",
+        "description": "Dividen Tunai {ticker}"
+      },
+      "ref_template": "DIV-{ticker}-{paydate}"
+    }
+  }
+]

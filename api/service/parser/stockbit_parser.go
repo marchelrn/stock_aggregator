@@ -43,6 +43,12 @@ func (p *StockbitParser) Parse(pdfBytes []byte) ([]dto.ParsedTrade, error) {
 }
 
 func (p *StockbitParser) ParseEmail(ctx context.Context, data []byte, meta EmailMetadata) ([]dto.ParsedTrade, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.Contains(strings.ToLower(meta.Filename), "_tcbond_") {
+		return nil, ErrEmailNotApplicable
+	}
 	trades, err := p.Parse(data)
 	if err != nil {
 		if errors.Is(err, ErrEmailNotApplicable) ||

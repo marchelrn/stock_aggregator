@@ -10,15 +10,6 @@ import (
 	"github.com/marchelrn/stock_api/models"
 )
 
-type ParsedCashMutation struct {
-	BrokerName  string                  `json:"broker_name"`
-	Type        models.CashMutationType `json:"type"` // DEPOSIT or WITHDRAW
-	Amount      float64                 `json:"amount"`
-	Date        time.Time               `json:"date"`
-	RefNo       string                  `json:"ref_no,omitempty"`
-	Description string                  `json:"description,omitempty"`
-}
-
 var (
 	// Trimegah Deposit: "Top up RDN kamu sebesar Rp 649,141.00 berhasil dilakukan."
 	reTrimegahDeposit = regexp.MustCompile(`(?i)(?:top\s+up\s+rdn|deposit).*?sebesar\s*(?:<[^>]+>\s*)*rp\s*([\d,.]+)`)
@@ -87,7 +78,10 @@ func cleanAndParseAmount(raw string) (float64, error) {
 	return strconv.ParseFloat(cleaned, 64)
 }
 
-// ParseCashEmail parses a cash mutation email from its sender, subject, date, and body HTML/text.
+// ParseCashEmail is retained only as a replay oracle for the old formats.
+// Production Gmail sync uses CashEmailParser and never calls this function.
+//
+// Deprecated: use a validated MetadataParser.CashParser snapshot.
 func ParseCashEmail(from, subject string, emailDate time.Time, body string) (*ParsedCashMutation, error) {
 	fromLower := strings.ToLower(from)
 	subjectLower := strings.ToLower(subject)

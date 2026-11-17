@@ -1,0 +1,85 @@
+[
+  {
+    "key": "stockbit",
+    "broker_name": "Stockbit Sekuritas",
+    "version": 2,
+    "email_sender": "no-reply@stockbit.com",
+    "subject_contains": "Trade Confirmation",
+    "config": {
+      "schema_version": 2, "document": "pdf", "kind": "trade", "parse_mode": "metadata",
+      "exclude_filename_pattern": "(?i)^TC_EIPO_",
+      "required_markers": ["Trade Confirmation", "REF #"],
+      "date": {"pattern": "Transaction Date\\s+(\\d{2}/\\d{2}/\\d{4})", "group": 1, "layout": "02/01/2006"},
+      "numbers": {"decimal_separator": ".", "thousands_separator": ",", "grouping_size": 3},
+      "shares_per_lot": 100,
+      "table": {
+        "start_pattern": "(?m)^[ \\t]*REF #\\s+Board\\s+Share\\s+Lot\\s+Quantity\\s+Price\\s+Buy\\s+Sell[ \\t]*\\r?\\n",
+        "end_pattern": "(?m)^[ \\t]*(?:Total Value|Your RDN)",
+        "row_pattern": "(?m)^[ \\t]*([0-9]{5,})\\s+(?:RG|NG|TN|UH)\\s+([A-Z]{4})[ \\t]+[^\\r\\n]+?\\s+([\\d,.]+)\\s+([\\d,.]+)\\s+([\\d,.]+)\\s+([\\d,.]+)\\s+([\\d,.]+)[ \\t]*(?:\\r?\\n|$)",
+        "fields": {"ref": 1, "ticker": 2, "lot": 3, "quantity": 4, "price": 5, "buy_amount": 6, "sell_amount": 7}
+      },
+      "trade": {
+        "extraction": "plain",
+        "fee_allocation": "side",
+        "buy_fallback_rate": 0.0015, "sell_fallback_rate": 0.0025,
+        "sell_amount": "add",
+        "fees": [
+          {"pattern": "(?m)^[ \\t]*Commission[ \\t]*\\r?\\n[ \\t]*([\\d,.]+)[ \\t]*\\r?\\n[ \\t]*([\\d,.]+)", "buy_group": 1, "sell_group": 2},
+          {"pattern": "(?m)^[ \\t]*V\\.A\\.T Commission[ \\t]*\\r?\\n[ \\t]*([\\d,.]+)[ \\t]*\\r?\\n[ \\t]*([\\d,.]+)", "buy_group": 1, "sell_group": 2},
+          {"pattern": "(?m)^[ \\t]*IDX Fee[ \\t]*\\r?\\n[ \\t]*([\\d,.]+)[ \\t]*\\r?\\n[ \\t]*([\\d,.]+)", "buy_group": 1, "sell_group": 2},
+          {"pattern": "(?m)^[ \\t]*V\\.A\\.T Levy[ \\t]*\\r?\\n[ \\t]*([\\d,.]+)[ \\t]*\\r?\\n[ \\t]*([\\d,.]+)", "buy_group": 1, "sell_group": 2},
+          {"pattern": "(?m)^[ \\t]*Income Tax[ \\t]*\\r?\\n[ \\t]*([\\d,.]+)[ \\t]*\\r?\\n[ \\t]*([\\d,.]+)", "buy_group": 1, "sell_group": 2},
+          {"pattern": "(?m)^[ \\t]*Stamp Duty[ \\t]*\\r?\\n[ \\t]*([\\d,.]+)[ \\t]*\\r?\\n[ \\t]*([\\d,.]+)", "buy_group": 1, "sell_group": 2}
+        ]
+      }
+    }
+  },
+  {
+    "key": "trimegah",
+    "broker_name": "Trimegah Sekuritas",
+    "version": 2,
+    "email_sender": "trim.operation@trimegah.com",
+    "subject_contains": "",
+    "config": {
+      "schema_version": 2, "document": "pdf", "kind": "trade", "parse_mode": "metadata",
+      "required_markers": ["(?i)Trimegah"],
+      "date": {"pattern": "Tanggal\\s*:\\s*(\\d{2} [A-Za-z]+ \\d{4})", "group": 1, "layout": "02 January 2006"},
+      "numbers": {"decimal_separator": ".", "thousands_separator": ",", "grouping_size": 3},
+      "shares_per_lot": 100,
+      "table": {
+        "start_pattern": "(?m)^[ \\t]*TRX[ \\t]+PASAR[ \\t]+EFEK[^\\r\\n]*\\r?\\n",
+        "end_pattern": "(?m)^[ \\t]*Total Transaksi BELI",
+        "row_pattern": "(?m)^[ \\t]*(BELI|JUAL|BUY|SELL)[ \\t]+(?:RG|NG|TN|UH)[ \\t]+([A-Z0-9]{4}(?:-[A-Z0-9]+)?)[ \\t]+.+?[ \\t]+([\\d,.]+)[ \\t]+([\\d,.]+)[ \\t]+\\(?([\\d,.]+)\\)?[ \\t]*(?:\\r?\\n|$)",
+        "fields": {"side": 1, "ticker": 2, "price": 3, "quantity": 4, "amount": 5}
+      },
+      "trade": {
+        "extraction": "layout",
+        "date_replacements": {
+          "januari": "January", "februari": "February", "maret": "March",
+          "april": "April", "mei": "May", "juni": "June", "juli": "July",
+          "agustus": "August", "september": "September", "oktober": "October",
+          "november": "November", "desember": "December"
+        },
+        "side_values": {"BELI": "BUY", "JUAL": "SELL", "BUY": "BUY", "SELL": "SELL"},
+        "reference_fields": {"client": {"source": "body", "pattern": "(?i)Kode\\s+Nasabah\\s*:\\s*([A-Z0-9]+)", "group": 1}},
+        "ref_template": "TRIM-{client}-{date}-{ticker}-{sequence}",
+        "fee_allocation": "all",
+        "buy_fallback_rate": 0.0015, "sell_fallback_rate": 0.0025,
+        "sell_amount": "subtract",
+        "fees": [{"pattern": "(?m)Total Pembebanan[ \\t]+([\\d,.]+)[ \\t]*$", "total_group": 1}]
+      }
+    }
+  },
+  {
+    "key": "stockbit.eipo",
+    "broker_name": "Stockbit Sekuritas",
+    "version": 1,
+    "email_sender": "no-reply@stockbit.com",
+    "subject_contains": "Trade Confirmation",
+    "config": {
+      "schema_version": 2, "document": "pdf", "kind": "trade",
+      "parse_mode": "legacy", "legacy_parser": "eipo",
+      "filename_pattern": "(?i)^TC_EIPO_"
+    }
+  }
+]
