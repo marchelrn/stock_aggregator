@@ -34,10 +34,7 @@ export default function BrokersPage() {
     fetchStockPrices,
     clearLiveStockPrices,
     setStatus,
-    syncTradeConfirmations,
-    syncCashMutations,
     loadCashMutations,
-    getGmailSyncStatus,
   } = usePortfolio()
 
   const [cashMutations, setCashMutations] = useState<CashMutationData[]>([])
@@ -58,12 +55,6 @@ export default function BrokersPage() {
   const [configBrokerName, setConfigBrokerName] = useState('')
   const [configCash, setConfigCash] = useState<number | ''>('')
   const [configPin, setConfigPin] = useState('')
-
-  // Gmail sync state
-  const [gmailSyncEnabled, setGmailSyncEnabled] = useState(false)
-  const [lastGmailSync, setLastGmailSync] = useState<string | null>(null)
-  const [syncingTrades, setSyncingTrades] = useState(false)
-  const [syncingCash, setSyncingCash] = useState(false)
 
   // State untuk penambahan saham pada broker
   const [pendingStocks, setPendingStocks] = useState<PendingStock[]>([])
@@ -104,38 +95,6 @@ export default function BrokersPage() {
       return unchanged ? prev : next
     })
   }, [state.brokers])
-
-  // Fetch Gmail sync status on load
-  useEffect(() => {
-    getGmailSyncStatus().then((res) => {
-      if (res) {
-        setGmailSyncEnabled(res.GmailSyncEnabled ?? res.gmail_sync_enabled ?? false)
-        setLastGmailSync(res.LastSyncAt ?? res.last_sync_at ?? null)
-      }
-    })
-  }, [getGmailSyncStatus])
-
-  const handleSyncTradeConfirmations = async (fullSync = false) => {
-    setSyncingTrades(true)
-    const res = await syncTradeConfirmations(fullSync)
-    if (res) {
-      setGmailSyncEnabled(true)
-      setLastGmailSync(new Date().toISOString())
-    }
-    setSyncingTrades(false)
-  }
-
-  const handleSyncCashMutations = async () => {
-    setSyncingCash(true)
-    const res = await syncCashMutations()
-    if (res) {
-      setGmailSyncEnabled(true)
-      setLastGmailSync(new Date().toISOString())
-      // Refresh cash mutation list after sync
-      loadCashMutations().then(setCashMutations)
-    }
-    setSyncingCash(false)
-  }
 
   const handleToggleBroker = (id: number) => {
     setSelectedBrokerIds((current) =>
@@ -327,44 +286,6 @@ export default function BrokersPage() {
             onRemove={setBrokerToRemove}
             onEditCash={setCashBaseBroker}
           />
-        </section>
-
-        {/* Gmail Sync Section */}
-        <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-xl font-semibold">Gmail Sync</h2>
-            <span className={`text-xs font-medium px-2 py-0.5 rounded ${gmailSyncEnabled ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'}`}>
-              {gmailSyncEnabled ? 'Terhubung' : 'Belum Terhubung'}
-            </span>
-          </div>
-          {lastGmailSync && (
-            <p className="mt-1 text-sm text-slate-500">
-              Terakhir sync: {new Date(lastGmailSync).toLocaleString('id-ID')}
-            </p>
-          )}
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
-              onClick={() => handleSyncTradeConfirmations(false)}
-              disabled={syncingTrades}
-            >
-              {syncingTrades ? 'Menyinkronkan...' : 'Sync Trade Confirmation'}
-            </button>
-            <button
-              className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-50"
-              onClick={() => handleSyncTradeConfirmations(true)}
-              disabled={syncingTrades}
-            >
-              Full Sync (Semua Riwayat)
-            </button>
-            <button
-              className="rounded-lg bg-amber-700 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
-              onClick={handleSyncCashMutations}
-              disabled={syncingCash}
-            >
-              {syncingCash ? 'Menyinkronkan...' : 'Sync Deposit & Penarikan'}
-            </button>
-          </div>
         </section>
 
         <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
