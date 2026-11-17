@@ -38,6 +38,8 @@ func getMigrations() []migration {
 		&RefineMetadataCashSubjects{},
 		&PromoteMetadataTradeTemplates{},
 		&RefineStockbitDepositSubject{},
+		&AddMandiriTradeTemplate{},
+		&RefineMandiriPageBreaks{},
 	}
 }
 

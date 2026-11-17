@@ -353,6 +353,24 @@ func (s *GmailServiceImpl) syncTradeConfirmations(ctx context.Context, gmailSrv 
 
 // syncTradeConfirmationsWithDate performs sync with a specific sync date
 func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, gmailSrv *gmail.Service, user *models.Users, startedAt time.Time, syncDate *time.Time) (*dto.GmailSyncResponse, error) {
+	if s.BrokerRepo != nil {
+		brokers, err := s.BrokerRepo.GetAllBrokers(user.Id)
+		if err != nil {
+			return nil, fmt.Errorf("load broker PDF credentials: %w", err)
+		}
+		passwords := make(map[string]string)
+		for _, broker := range brokers {
+			if broker.PDFPasswordEncrypted == "" {
+				continue
+			}
+			password, err := utils.Decrypt(broker.PDFPasswordEncrypted, config.GetConfig().EncryptionKey)
+			if err != nil {
+				return nil, errors.New("gagal membuka kredensial PDF broker")
+			}
+			passwords[broker.Name] = password
+		}
+		ctx = parser.WithPDFPasswords(ctx, passwords)
+	}
 	query, err := s.tradeConfirmationQuery(ctx, syncDate)
 	if err != nil {
 		return nil, err

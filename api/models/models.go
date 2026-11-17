@@ -4,10 +4,11 @@ import "time"
 
 // Brokers
 type Broker struct {
-	ID     int     `json:"id"`
-	UserID uint    `json:"user_id" gorm:"column:user_id;index"`
-	Name   string  `json:"name"`
-	Cash   float64 `json:"cash"`
+	PDFPasswordEncrypted string  `json:"-" gorm:"column:pdf_password_encrypted;not null;default:''"`
+	ID                   int     `json:"id"`
+	UserID               uint    `json:"user_id" gorm:"column:user_id;index"`
+	Name                 string  `json:"name"`
+	Cash                 float64 `json:"cash"`
 	// CashBase adalah saldo dasar yang di-set manual oleh user.
 	// Cash events count only after max(Users.CreatedAt, CashBaseAsOf).
 	CashBase     float64    `json:"cash_base"`
