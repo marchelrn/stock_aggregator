@@ -24,6 +24,7 @@ import type {
   GmailSyncResponse,
   GmailSyncStatusResponse,
   CashMutationsResponse,
+  SetupSyncResponse,
 } from '../types'
 
 interface PortfolioState {
@@ -59,6 +60,7 @@ interface PortfolioContextValue {
   syncStockSectors: () => Promise<boolean>
   syncTradeConfirmations: (fullSync?: boolean) => Promise<GmailSyncResponse | null>
   syncCashMutations: () => Promise<CashMutationsResponse | null>
+  syncSetupHistorical: () => Promise<SetupSyncResponse | null>
   loadCashMutations: () => Promise<CashMutationData[]>
   getGmailSyncStatus: () => Promise<GmailSyncStatusResponse | null>
   getCashBreakdown: (brokerId: number) => Promise<CashBreakdown | null>
@@ -401,6 +403,18 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     }
   }, [setStatus])
 
+  // Sync historis sekali jalan setelah broker disimpan pada setup awal.
+  // Endpoint mengembalikan hasil transaksi dan mutasi kas secara terpisah.
+  const syncSetupHistorical = useCallback(async (): Promise<SetupSyncResponse | null> => {
+    try {
+      const res = await api<SetupSyncResponse>('/api/gmail/setup-sync', { method: 'POST' })
+      return res
+    } catch (error) {
+      setStatus((error as Error).message, true)
+      return null
+    }
+  }, [setStatus])
+
   const loadCashMutations = useCallback(async (): Promise<CashMutationData[]> => {
     try {
       const res = await api<{ data?: CashMutationData[] }>('/api/gmail/cash-mutations')
@@ -461,6 +475,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       syncStockSectors,
       syncTradeConfirmations,
       syncCashMutations,
+      syncSetupHistorical,
       loadCashMutations,
       getGmailSyncStatus,
       getCashBreakdown,
@@ -483,6 +498,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       syncStockSectors,
       syncTradeConfirmations,
       syncCashMutations,
+      syncSetupHistorical,
       loadCashMutations,
       getGmailSyncStatus,
       getCashBreakdown,

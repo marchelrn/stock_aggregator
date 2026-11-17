@@ -1,243 +1,209 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { usePortfolio } from '../context/PortfolioContext'
+import SetupFlowModal, { type ManualHolding } from '../components/SetupFlowModal'
+import { formatCurrency } from '../lib/formatters'
+import { api } from '../lib/api'
+import './SetupPage.css'
 
-interface LocalHolding {
-  ticker: string
-  lot: number
-  price: number
-}
+const BROKERS = [
+  { name: 'Stockbit Sekuritas', needsPin: false, disabled: false },
+  { name: 'Trimegah Sekuritas', needsPin: false, disabled: false },
+  { name: 'Mandiri Sekuritas', needsPin: true, disabled: false },
+  { name: 'BNI Sekuritas', needsPin: false, disabled: true },
+]
 
 export default function SetupPage() {
   const navigate = useNavigate()
-  const { addBroker, createTransaction, state } = usePortfolio()
+  const { state, addBroker, loadDashboard, syncSetupHistorical, createTransaction } = usePortfolio()
+  const [brokerName, setBrokerName] = useState('Stockbit Sekuritas')
+  const [cash, setCash] = useState('')
+  const [pin, setPin] = useState('')
+  const [showForm, setShowForm] = useState(true)
+  const [running, setRunning] = useState(false)
+  const [initialLoading, setInitialLoading] = useState(true)
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const [elapsed, setElapsed] = useState(0)
+  const [review, setReview] = useState(false)
+  const [manualHoldings, setManualHoldings] = useState<ManualHolding[]>([])
+  const [finishing, setFinishing] = useState(false)
+  const [finishError, setFinishError] = useState('')
+  const busy = useRef(false)
+  const selectRef = useRef<HTMLSelectElement>(null)
+  const option = BROKERS.find((broker) => broker.name === brokerName)!
+  const savedBroker = state.brokers.find((broker) => broker.name === brokerName)
+  const existing = Boolean(savedBroker)
+  const cost = state.holdings.reduce((sum, holding) => sum + holding.lot * 100 * holding.avg_price, 0)
+  const totalCash = state.brokers.reduce((sum, broker) => sum + broker.cash, 0)
 
-  const [isBrokerAdded, setIsBrokerAdded] = useState(false)
-  const [localHoldings, setLocalHoldings] = useState<LocalHolding[]>([])
+  useEffect(() => {
+    let active = true
+    loadDashboard({ silent: true }).finally(() => { if (active) setInitialLoading(false) })
+    return () => { active = false }
+  }, [loadDashboard])
 
-  const [brokerName, setBrokerName] = useState('')
-  const [brokerCash, setBrokerCash] = useState(0)
-  const [brokerPin, setBrokerPin] = useState('')
+  useEffect(() => {
+    if (!running) return
+    const timer = window.setInterval(() => setElapsed((value) => value + 1), 1000)
+    return () => window.clearInterval(timer)
+  }, [running])
 
-  const [holdingTicker, setHoldingTicker] = useState('')
-  const [holdingLot, setHoldingLot] = useState(1)
-  const [holdingPrice, setHoldingPrice] = useState(0)
-
-  const submitBroker = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!brokerName) return
-    if (brokerName === 'Mandiri Sekuritas' && !brokerPin) {
-      toast.error('PIN wajib diisi untuk Mandiri Sekuritas')
-      return
+  const connectBroker = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (busy.current || initialLoading) return
+    busy.current = true
+    setRunning(true)
+    setError('')
+    setElapsed(0)
+    setMessage(`Menyiapkan ${brokerName}…`)
+    try {
+      if (savedBroker && pin) {
+        await api(`/broker/${savedBroker.id}`, { method: 'PUT', body: JSON.stringify({ pin }) })
+        setPin('')
+      }
+      if (!existing && !await addBroker(brokerName, Number(cash) || 0, pin)) {
+        setError(`Broker ${brokerName} belum berhasil disimpan. Silakan coba lagi.`)
+        setMessage('')
+        return
+      }
+      setMessage(`Menyinkronkan ${brokerName}…`)
+      const result = await syncSetupHistorical()
+      await loadDashboard({ silent: true })
+      if (!result) {
+        setError('Sinkronisasi gagal. Broker tetap tersimpan. Coba sinkronkan ulang atau lengkapi saham secara manual.')
+        setMessage('')
+        return
+      }
+      if (result.trade_error || result.cash_error) {
+        setError([result.trade_error && `Transaksi: ${result.trade_error}`, result.cash_error && `Mutasi kas: ${result.cash_error}`].filter(Boolean).join(' '))
+        setMessage('Sinkronisasi belum lengkap. Anda dapat mencoba lagi.')
+        return
+      }
+      setMessage(`${brokerName} tersinkron.`)
+      setShowForm(false)
+      setCash('')
+      setPin('')
+    } catch {
+      setError('Terjadi kesalahan saat memuat hasil. Coba sinkronkan ulang.')
+      setMessage('')
+    } finally {
+      busy.current = false
+      setRunning(false)
     }
-
-    const success = await addBroker(brokerName, brokerCash, brokerPin)
-    if (success) {
-      setIsBrokerAdded(true)
-    }
-  }
-
-  const addLocalHolding = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!holdingTicker || holdingLot <= 0 || holdingPrice <= 0) return
-
-    setLocalHoldings((prev) => [
-      ...prev,
-      { ticker: holdingTicker.toUpperCase(), lot: holdingLot, price: holdingPrice },
-    ])
-
-    setHoldingTicker('')
-    setHoldingLot(1)
-    setHoldingPrice(0)
   }
 
   const finishSetup = async () => {
-    // Sync local holdings as initial BUY transactions if any.
-    if (localHoldings.length > 0) {
-      const broker = state.brokers.find((b) => b.name === brokerName)
-
-      if (broker) {
-        for (const holding of localHoldings) {
-          await createTransaction({
-            type: 'BUY',
-            ticker: holding.ticker,
-            broker_id: Number(broker.id),
-            broker_name: broker.name,
-            lot: holding.lot,
-            price: holding.price,
-          })
-        }
+    if (busy.current) return
+    busy.current = true
+    setFinishing(true)
+    setFinishError('')
+    const failed: ManualHolding[] = []
+    try {
+      for (const holding of manualHoldings) {
+        const ok = await createTransaction({ type: 'BUY', ticker: holding.ticker, broker_id: holding.brokerId, broker_name: holding.brokerName, lot: holding.lot, price: holding.price })
+        if (!ok) failed.push(holding)
       }
+      setManualHoldings(failed)
+      if (failed.length) {
+        setFinishError(`Saham ${failed.map((holding) => holding.ticker).join(', ')} gagal disimpan. Periksa saldo kas broker, lalu coba lagi.`)
+        return
+      }
+      localStorage.setItem('isSetupCompleted', 'true')
+      toast.success('Setup awal selesai. Portofolio siap dipakai.')
+      navigate('/manage')
+    } finally {
+      busy.current = false
+      setFinishing(false)
     }
+  }
 
-    localStorage.setItem('isSetupCompleted', 'true')
-    toast.success('Setup awal berhasil diselesaikan!')
-    navigate('/')
+  const openForm = () => {
+    const available = BROKERS.find((broker) => !broker.disabled && !state.brokers.some((saved) => saved.name === broker.name))
+    if (available) setBrokerName(available.name)
+    setShowForm(true)
+    setCash('')
+    setPin('')
+    window.setTimeout(() => selectRef.current?.focus(), 0)
   }
 
   return (
-    <div className="mx-auto grid w-full max-w-3xl gap-6 px-4 py-8">
-      <div className="rounded-2xl border border-slate-300 bg-white/80 p-6 shadow-sm backdrop-blur">
-        <h1 className="text-2xl font-bold text-slate-800">Initial Setup</h1>
-        <p className="mt-2 text-sm text-slate-500">
-          Silakan konfigurasikan broker pertama Anda beserta cash dan saham awal yang Anda miliki
-          saat ini.
-        </p>
-      </div>
+    <div className="broker-setup">
+      <header className="setup-header">
+        <span className="setup-brand">Stock API</span>
+        <nav aria-label="Progres konfigurasi">
+          <ol className="setup-progress">
+            <li aria-current={review ? undefined : 'step'}>Hubungkan broker</li>
 
-      <section className="rounded-2xl border border-slate-300 bg-white/80 p-6 shadow-sm backdrop-blur">
-        <h2 className="mb-4 text-lg font-semibold">1. Hubungkan Broker</h2>
-        <form className="grid gap-3" onSubmit={submitBroker}>
-          <label className="text-sm text-slate-600" htmlFor="select-broker">
-            Pilih Sekuritas
-          </label>
-          <select
-            id="select-broker"
-            value={brokerName}
-            onChange={(e) => setBrokerName(e.target.value)}
-            required
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-          >
-            <option value="" disabled>
-              -- Pilih Sekuritas --
-            </option>
-            <option value="Mandiri Sekuritas">Mandiri Sekuritas (Growing/MOST)</option>
-            <option value="Stockbit Sekuritas">Stockbit Sekuritas</option>
-            <option value="BNI Sekuritas">BNI Sekuritas (BIONS)</option>
-          </select>
+            <li aria-current={review ? 'step' : undefined}>Periksa portofolio</li>
+          </ol>
+        </nav>
+      </header>
+      <div className="setup-columns">
+        <section className="setup-config" aria-labelledby="setup-title">
+          <div>
+            <h1 id="setup-title">Hubungkan broker</h1>
+            <p className="setup-intro">Impor transaksi dan saldo kas dari Gmail Anda.</p>
+          </div>
 
-          <label className="text-sm text-slate-600" htmlFor="initial-cash">
-            Initial Cash (IDR)
-          </label>
-          <input
-            id="initial-cash"
-            value={brokerCash}
-            onChange={(e) => setBrokerCash(Number(e.target.value))}
-            type="number"
-            min="0"
-            step="0.01"
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-            placeholder="0"
-          />
+          {(initialLoading || state.brokers.length > 0) && <div className="setup-connected" aria-busy={initialLoading}>
+            <h2>Broker terhubung <span>{state.brokers.length}</span></h2>
+            {initialLoading ? <p className="setup-muted" role="status">Memuat broker Anda…</p> : state.brokers.length === 0 ? (
+              <p className="setup-muted">Belum ada broker terhubung. Pilih broker pertama di bawah.</p>
+            ) : <ul>{state.brokers.map((broker) => (
+              <li key={broker.id}>
+                <div><strong>{broker.name}</strong><span>Saldo kas</span></div>
+                <span className="setup-number">{formatCurrency(broker.cash)}</span>
+              </li>
+            ))}</ul>}
+          </div>}
 
-          {brokerName === 'Mandiri Sekuritas' && (
-            <div className="grid gap-1">
-              <label className="text-sm text-slate-600" htmlFor="broker-pin">
-                PIN Trade Confirmation
-              </label>
-              <input
-                id="broker-pin"
-                value={brokerPin}
-                onChange={(e) => setBrokerPin(e.target.value)}
-                type="password"
-                required
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-                placeholder="Masukkan PIN"
-              />
-              <span className="text-xs text-slate-500">
-                PIN Anda aman dan akan dienkripsi sebelum disimpan.
-              </span>
-            </div>
-          )}
+          {showForm && <form onSubmit={connectBroker} className="setup-form">
+            <label htmlFor="setup-broker">Sekuritas</label>
+            <select ref={selectRef} id="setup-broker" value={brokerName} disabled={running || initialLoading} onChange={(event) => { setBrokerName(event.target.value); setCash(''); setPin(''); setError('') }}>
+              {BROKERS.map((broker) => <option key={broker.name} value={broker.name} disabled={broker.disabled}>{broker.name}{broker.disabled ? ' (belum tersedia)' : ''}</option>)}
+            </select>
+            {!existing && <>
+              <label htmlFor="setup-cash">Saldo kas awal (IDR)</label>
+              <input id="setup-cash" type="number" min="0" step="0.01" placeholder="0" value={cash} disabled={running} onChange={(event) => setCash(event.target.value)} />
+            </>}
+            {option.needsPin && <>
+              <label htmlFor="setup-pin">PIN trade confirmation</label>
+              <input id="setup-pin" type="password" required={!existing} autoComplete="off" placeholder={existing ? 'Isi untuk memperbarui PIN' : undefined} value={pin} disabled={running} onChange={(event) => setPin(event.target.value)} />
+            </>}
+            <button className="setup-secondary" type="submit" disabled={running || initialLoading}>{running ? 'Menyinkronkan…' : existing ? 'Sinkronkan ulang' : 'Hubungkan broker'}</button>
+          </form>}
 
-          <button
-            type="submit"
-            className="mt-2 w-full rounded-lg bg-teal-700 px-4 py-2 font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
-            disabled={isBrokerAdded}
-          >
-            {isBrokerAdded ? 'Broker Tersimpan ✓' : 'Simpan Broker'}
-          </button>
-        </form>
-      </section>
-
-      {isBrokerAdded && (
-        <section className="rounded-2xl border border-slate-300 bg-white/80 p-6 shadow-sm backdrop-blur">
-          <h2 className="mb-4 text-lg font-semibold">2. Masukkan Portfolio Awal</h2>
-
-          {localHoldings.length > 0 && (
-            <div className="mb-4 overflow-hidden rounded-xl border border-slate-300 bg-slate-50">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-slate-100 text-xs text-slate-500">
-                  <tr>
-                    <th className="p-2 pl-3">Ticker</th>
-                    <th className="p-2">Lot</th>
-                    <th className="p-2">Avg Price</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {localHoldings.map((h, idx) => (
-                    <tr key={idx} className="border-t border-slate-300">
-                      <td className="p-2 pl-3 font-semibold">{h.ticker}</td>
-                      <td className="p-2">{h.lot}</td>
-                      <td className="p-2">{h.price}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <form
-            className="grid gap-3 rounded-xl border border-slate-300 bg-slate-50 p-4"
-            onSubmit={addLocalHolding}
-          >
-            <div className="grid grid-cols-3 gap-3">
-              <div className="grid gap-1">
-                <label className="text-xs text-slate-600">Ticker</label>
-                <input
-                  value={holdingTicker}
-                  onChange={(e) => setHoldingTicker(e.target.value)}
-                  type="text"
-                  placeholder="BBCA"
-                  required
-                  className="rounded-md border border-slate-300 px-2 py-1.5 text-sm uppercase"
-                />
-              </div>
-              <div className="grid gap-1">
-                <label className="text-xs text-slate-600">Lot</label>
-                <input
-                  value={holdingLot}
-                  onChange={(e) => setHoldingLot(Number(e.target.value))}
-                  type="number"
-                  min="1"
-                  required
-                  className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                />
-              </div>
-              <div className="grid gap-1">
-                <label className="text-xs text-slate-600">Avg Price</label>
-                <input
-                  value={holdingPrice}
-                  onChange={(e) => setHoldingPrice(Number(e.target.value))}
-                  type="number"
-                  min="1"
-                  step="0.01"
-                  required
-                  className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                />
-              </div>
-            </div>
-            <button
-              type="submit"
-              className="w-full rounded-lg bg-slate-200 px-4 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-300"
-            >
-              + Tambah Saham
-            </button>
-          </form>
+          <div className="setup-feedback" aria-live="polite" aria-atomic="true">
+            {message && !running && <p role="status">{message}</p>}
+          </div>
+          {error && <p className="setup-error" role="alert">{error}</p>}
+          <div className="setup-actions">
+            {!showForm && <button type="button" className="setup-secondary" disabled={running} onClick={openForm}>Tambah broker lain</button>}
+            <button type="button" className="setup-primary" disabled={running || initialLoading || state.brokers.length === 0} onClick={() => setReview(true)}>Lanjutkan</button>
+          </div>
         </section>
-      )}
 
-      {isBrokerAdded && (
-        <div className="flex justify-end pt-2">
-          <button
-            onClick={finishSetup}
-            className="rounded-lg bg-teal-700 px-6 py-3 font-bold text-white shadow-lg hover:bg-teal-800"
-          >
-            Selesai &amp; Buka Dashboard →
-          </button>
-        </div>
-      )}
+        <aside className="setup-portfolio" aria-labelledby="portfolio-title">
+          <h2 id="portfolio-title">Portofolio Anda</h2>
+          <dl className="setup-totals">
+            <div><dt>Nilai pembelian · IDR</dt><dd>{formatCurrency(cost)}</dd></div>
+            <div><dt>Saldo kas · IDR</dt><dd>{formatCurrency(totalCash)}</dd></div>
+          </dl>
+          <div className="setup-holdings-header"><h3>Daftar Ticker</h3><span>{state.holdings.length} posisi</span></div>
+          {running && <div className="setup-loading" role="status"><strong>Membaca saham dari email…</strong><span>{elapsed} detik · Dapat memerlukan beberapa menit.</span></div>}
+          {initialLoading ? <p role="status" className="setup-empty">Memuat portofolio…</p> : state.holdings.length === 0 ? (
+            <div className="setup-empty"><strong>Belum ada saham terbaca</strong><p>{state.brokers.length ? 'Sinkronkan ulang atau lengkapi saham pada langkah berikutnya.' : 'Saham akan muncul setelah broker terhubung.'}</p></div>
+          ) : <ul className="setup-holdings">{state.holdings.map((holding, index) => (
+            <li key={`${holding.broker_id}-${holding.ticker}-${index}`}>
+              <div><strong>{holding.ticker}</strong><span>{holding.broker_name}</span></div>
+              <div className="setup-number"><strong>{holding.lot} lot</strong><span>Rata-rata {formatCurrency(holding.avg_price)}</span></div>
+            </li>
+          ))}</ul>}
+        </aside>
+      </div>
+      {review && <SetupFlowModal stage="portfolio" running={false} steps={[]} elapsed={0} tradeSummary="" cashSummary="" tradeError={error} cashError="" holdings={state.holdings} brokers={state.brokers} manualHoldings={manualHoldings} finishing={finishing} finishError={finishError} onContinue={() => {}} onFinish={finishSetup} onClose={() => setReview(false)} onAddManual={(holding) => { setFinishError(''); setManualHoldings((prev) => [...prev, holding]) }} onRemoveManual={(index) => { setFinishError(''); setManualHoldings((prev) => prev.filter((_, position) => position !== index)) }} />}
     </div>
   )
 }

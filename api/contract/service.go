@@ -28,6 +28,7 @@ type GmailService interface {
 	SyncTradeConfirmations(userID uint) (*dto.GmailSyncResponse, error)
 	SyncTradeConfirmationsFullContext(ctx context.Context, userID uint) (*dto.GmailSyncResponse, error)
 	SyncCashMutations(userID uint) (*dto.GmailCashSyncResponse, error)
+	SyncCashMutationsContext(ctx context.Context, userID uint) (*dto.GmailCashSyncResponse, error)
 	GetCashMutations(userID uint) (*dto.CashMutationsListResponse, error)
 	GetSyncStatus(userID uint) (*dto.GmailSyncStatusResponse, error)
 }
