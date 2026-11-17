@@ -34,7 +34,7 @@ export function buildSummary(
   const getCurrentPrice = (ticker: unknown, fallbackPrice: unknown): number => {
     const key = String(ticker || '').toUpperCase()
     const priceRow = priceMap?.[key]
-    if (priceRow && priceRow.price != null) return num(priceRow.price)
+    if (priceRow && Number.isFinite(Number(priceRow.price)) && Number(priceRow.price) > 0) return Number(priceRow.price)
     return num(fallbackPrice)
   }
 

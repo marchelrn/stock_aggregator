@@ -59,7 +59,7 @@ func (r *YahooRepository) SavePrice(price *models.StockPrice) error {
 }
 
 func (r *YahooRepository) UpdateSector(ticker string, sector string) error {
-	res := r.db.Model(&models.StockPrice{}).Where("ticker = ?", ticker).Update("sector", sector)
+	res := r.db.Model(&models.StockPrice{}).Where("ticker = ?", ticker).UpdateColumn("sector", sector)
 	if res.Error != nil {
 		return res.Error
 	}
