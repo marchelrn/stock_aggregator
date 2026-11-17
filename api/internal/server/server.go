@@ -21,16 +21,19 @@ func Run() {
 	cfg := config.GetConfig()
 
 	db, sqlDB := database.ConnectDB()
-	
+
 	repo := repository.New(db)
 	srv, err := service.New(repo)
 	if err != nil {
 		log.Fatalf("Failed to initialize services: %v", err)
 	}
 
-	r:= routes.SetupRoutes(srv)
+	r := routes.SetupRoutes(srv)
 
 	migrations.Up(sqlDB)
+
+	// Sync Gmail otomatis tiap jam pada jam pasar tutup (WITA).
+	service.NewGmailScheduler(srv.Gmail, repo.Auth).Start()
 
 	serv := &http.Server{
 		Addr:    fmt.Sprintf(":%s", cfg.Port),

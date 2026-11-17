@@ -37,6 +37,9 @@ type AuthRepository interface {
 	FindByProviderID(providerID string) (*models.Users, error)
 	CreateUser(user *models.Users) (*models.Users, error)
 	UpdateUser(user *models.Users) (*models.Users, error)
+	// ListGmailSyncCandidates mengembalikan user yang sync Gmail-nya aktif dan
+	// masih menyimpan refresh token, dipakai oleh penjadwal sync per jam.
+	ListGmailSyncCandidates(ctx context.Context) ([]models.Users, error)
 }
 
 type StocksRepository interface {
