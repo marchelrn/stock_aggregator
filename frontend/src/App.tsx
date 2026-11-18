@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { SquareArrowRightExit } from 'lucide-react'
 import DashboardPage from './pages/DashboardPage'
 import BrokersPage from './pages/BrokersPage'
 import MarketPage from './pages/MarketPage'
@@ -63,7 +64,7 @@ function Nav() {
           onClick={logout}
           className="rounded-lg px-3 py-1.5 text-sm font-semibold text-rose-600 hover:bg-rose-50 transition"
         >
-          Logout
+          <SquareArrowRightExit/>
         </button>
       </div>
     </nav>
