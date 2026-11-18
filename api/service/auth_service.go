@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"net/http"
 	"time"
 
@@ -15,9 +14,7 @@ import (
 	"github.com/marchelrn/stock_api/dto"
 	"github.com/marchelrn/stock_api/models"
 	errs "github.com/marchelrn/stock_api/pkg/error"
-	"github.com/marchelrn/stock_api/utils"
 	"golang.org/x/crypto/bcrypt"
-	"golang.org/x/oauth2"
 	"gorm.io/gorm"
 )
 
@@ -183,35 +180,6 @@ func (s *AuthService) GoogleLogin(code string) (*dto.AuthResponse, error) {
 		}
 	}
 
-	// Encrypt and store Gmail tokens
-	if token.AccessToken != "" {
-		encAccessToken, err := utils.Encrypt(token.AccessToken, cfg.EncryptionKey)
-		if err != nil {
-			log.Printf("Warning: failed to encrypt access token: %v", err)
-		} else {
-			user.GmailAccessToken = &encAccessToken
-		}
-	}
-
-	if token.RefreshToken != "" {
-		encRefreshToken, err := utils.Encrypt(token.RefreshToken, cfg.EncryptionKey)
-		if err != nil {
-			log.Printf("Warning: failed to encrypt refresh token: %v", err)
-		} else {
-			user.GmailRefreshToken = &encRefreshToken
-		}
-	}
-
-	if !token.Expiry.IsZero() {
-		user.GmailTokenExpiry = &token.Expiry
-	}
-
-	user.GmailSyncEnabled = true
-	user, err = s.AuthRepository.UpdateUser(user)
-	if err != nil {
-		log.Printf("Warning: failed to save Gmail tokens: %v", err)
-	}
-
 	tokenString, err := s.generateJWT(user)
 	if err != nil {
 		return nil, errs.InternalServerError("Gagal membuat token")
@@ -227,10 +195,7 @@ func (s *AuthService) GoogleLogin(code string) (*dto.AuthResponse, error) {
 
 func (s *AuthService) GetGoogleLoginURL(state string) string {
 	cfg := config.GetConfig()
-	return cfg.GoogleOAuthConfig.AuthCodeURL(state,
-		oauth2.AccessTypeOffline,
-		oauth2.ApprovalForce,
-	)
+	return cfg.GoogleOAuthConfig.AuthCodeURL(state)
 }
 
 func (s *AuthService) GetUserInformation(UserID float64) (*dto.UserResponse, error) {

@@ -120,6 +120,8 @@ func SetupRoutes(s *contract.Service) *gin.Engine {
 		protected.POST("/api/gmail/sync-cash", gmailController.SyncCashMutations)
 		protected.GET("/api/gmail/cash-mutations", gmailController.GetCashMutations)
 		protected.GET("/api/gmail/status", gmailController.GetSyncStatus)
+		protected.POST("/api/gmail/connect", authController.StartGmailConnection)
+		protected.POST("/api/gmail/connect/complete", authController.CompleteGmailConnection)
 		protected.GET("/api/auth/user", authController.GetUserInformation)
 	}
 

@@ -21,6 +21,8 @@ type AuthService interface {
 	Login(payload *dto.LoginRequest) (*dto.AuthResponse, error)
 	GoogleLogin(code string) (*dto.AuthResponse, error)
 	GetGoogleLoginURL(state string) string
+	StartGmailConnection(userID uint) (*dto.GmailConnectionStart, error)
+	CompleteGmailConnection(ctx context.Context, userID uint, request dto.GmailConnectionRequest) error
 	GetUserInformation(userID float64) (*dto.UserResponse, error)
 }
 

@@ -9,6 +9,7 @@ import HoldingTable from '../components/HoldingTable'
 import TransactionHistory from '../components/TransactionHistory'
 import StockPrices from '../components/StockPrices'
 import CashBaseModal from '../components/CashBaseModal'
+import GmailConnection, { useGmailConnectionStatus } from '../components/GmailConnection'
 
 interface TradeModalState {
   open: boolean
@@ -23,6 +24,7 @@ interface PendingStock {
 }
 
 export default function BrokersPage() {
+  const gmail = useGmailConnectionStatus()
   const {
     state,
     loadDashboard,
@@ -268,6 +270,7 @@ export default function BrokersPage() {
   return (
     <>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4">
+        {/*<GmailConnection {...gmail} returnTo="/manage" />*/}
         <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-xl font-semibold">Brokers</h2>

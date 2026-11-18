@@ -222,7 +222,7 @@ func (s *GmailServiceImpl) getGmailClient(ctx context.Context, user *models.User
 	cfg := config.GetConfig()
 
 	if user.GmailRefreshToken == nil {
-		return nil, errs.BadRequest("Akun belum terhubung dengan Gmail. Silakan login ulang via Google.")
+		return nil, errs.BadRequest("Akun belum terhubung dengan Gmail. Gunakan tombol Hubungkan Gmail.")
 	}
 
 	// Decrypt tokens
@@ -300,7 +300,7 @@ func (s *GmailServiceImpl) SyncTradeConfirmationsFullContext(ctx context.Context
 	}
 
 	if !user.GmailSyncEnabled {
-		return nil, errs.BadRequest("Gmail sync belum diaktifkan. Silakan login ulang via Google.")
+		return nil, errs.BadRequest("Gmail sync belum diaktifkan. Gunakan tombol Hubungkan Gmail.")
 	}
 
 	// Create Gmail client
@@ -326,7 +326,7 @@ func (s *GmailServiceImpl) SyncTradeConfirmationsContext(ctx context.Context, us
 	}
 
 	if !user.GmailSyncEnabled {
-		return nil, errs.BadRequest("Gmail sync belum diaktifkan. Silakan login ulang via Google.")
+		return nil, errs.BadRequest("Gmail sync belum diaktifkan. Gunakan tombol Hubungkan Gmail.")
 	}
 
 	// Create Gmail client
@@ -507,7 +507,7 @@ func (s *GmailServiceImpl) GetSyncStatus(userID uint) (*dto.GmailSyncStatusRespo
 	return &dto.GmailSyncStatusResponse{
 		StatusCode:       http.StatusOK,
 		Message:          "Status sync Gmail",
-		GmailSyncEnabled: user.GmailSyncEnabled,
+		GmailSyncEnabled: user.GmailSyncEnabled && user.GmailRefreshToken != nil && *user.GmailRefreshToken != "",
 		LastSyncAt:       user.LastGmailSyncAt,
 	}, nil
 }
@@ -553,7 +553,7 @@ func (s *GmailServiceImpl) SyncCashMutationsContext(ctx context.Context, userID 
 	}
 
 	if !user.GmailSyncEnabled {
-		return nil, errs.BadRequest("Gmail sync belum diaktifkan. Silakan login ulang via Google.")
+		return nil, errs.BadRequest("Gmail sync belum diaktifkan. Gunakan tombol Hubungkan Gmail.")
 	}
 
 	// Create Gmail client

@@ -5,6 +5,7 @@ import BrokersPage from './pages/BrokersPage'
 import MarketPage from './pages/MarketPage'
 import LoginPage from './pages/LoginPage'
 import AuthCallback from './pages/AuthCallback'
+import GmailCallback from './pages/GmailCallback'
 import SetupPage from './pages/SetupPage'
 import { UNAUTHORIZED_EVENT } from './lib/api'
 import { clearSession, hasValidSession } from './lib/session'
@@ -29,7 +30,7 @@ function Nav() {
   const location = useLocation()
   const navigate = useNavigate()
 
-  const isAuthRoute = location.pathname === '/login' || location.pathname === '/setup'
+  const isAuthRoute = location.pathname === '/login' || location.pathname === '/setup' || location.pathname === '/auth/gmail/callback'
   if (isAuthRoute) return null
 
   const userName = localStorage.getItem('userName')
@@ -88,6 +89,7 @@ export default function App() {
       <main className="w-full py-7">
         <Routes>
           <Route path="/login" element={<LoginRoute />} />
+          <Route path="/auth/gmail/callback" element={<RequireAuth><GmailCallback /></RequireAuth>} />
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route
             path="/setup"

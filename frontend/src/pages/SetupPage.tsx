@@ -1,10 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { usePortfolio } from '../context/PortfolioContext'
 import SetupFlowModal, { type ManualHolding } from '../components/SetupFlowModal'
+import { startGmailConnection } from '../components/GmailConnection'
+import type { GmailSyncStatusResponse } from '../types'
 import { formatCurrency } from '../lib/formatters'
 import { api } from '../lib/api'
+import { ChevronRightIcon } from 'lucide-react'
+
 import './SetupPage.css'
 
 const BROKERS = [
@@ -17,7 +21,10 @@ const BROKERS = [
 export default function SetupPage() {
   const navigate = useNavigate()
   const { state, addBroker, loadDashboard, syncSetupHistorical, createTransaction } = usePortfolio()
-  const [brokerName, setBrokerName] = useState('Stockbit Sekuritas')
+  const location = useLocation()
+  const [brokerName, setBrokerName] = useState(() =>
+    BROKERS.find((broker) => broker.name === location.state?.brokerName && !broker.disabled)?.name ?? BROKERS[0].name)
+  const [syncing, setSyncing] = useState(false)
   const [cash, setCash] = useState('')
   const [pin, setPin] = useState('')
   const [showForm, setShowForm] = useState(true)
@@ -50,6 +57,35 @@ export default function SetupPage() {
     return () => window.clearInterval(timer)
   }, [running])
 
+  const syncSavedBroker = useCallback(async (name: string) => {
+    setSyncing(true)
+    try {
+      const result = await syncSetupHistorical()
+      await loadDashboard({ silent: true })
+      if (!result) throw new Error('Sinkronisasi gagal. Broker tetap tersimpan. Coba lagi atau lengkapi saham secara manual.')
+      if (result.trade_error || result.cash_error) {
+        throw new Error([result.trade_error, result.cash_error].filter(Boolean).join(' '))
+      }
+      setShowForm(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sinkronisasi gagal. Broker tetap tersimpan.')
+      setMessage('')
+    } finally {
+      setSyncing(false)
+    }
+  }, [syncSetupHistorical, loadDashboard])
+
+  useEffect(() => {
+    if (!location.state?.syncAfterConsent || initialLoading || busy.current) return
+    busy.current = true
+    navigate('/setup', { replace: true, state: null })
+    setRunning(true)
+    void syncSavedBroker(brokerName).finally(() => {
+      busy.current = false
+      setRunning(false)
+    })
+  }, [location.state, initialLoading, brokerName, navigate, syncSavedBroker])
+
   const connectBroker = async (event: React.FormEvent) => {
     event.preventDefault()
     if (busy.current || initialLoading) return
@@ -68,25 +104,16 @@ export default function SetupPage() {
         setMessage('')
         return
       }
-      setMessage(`Menyinkronkan ${brokerName}…`)
-      const result = await syncSetupHistorical()
-      await loadDashboard({ silent: true })
-      if (!result) {
-        setError('Sinkronisasi gagal. Broker tetap tersimpan. Coba sinkronkan ulang atau lengkapi saham secara manual.')
-        setMessage('')
-        return
-      }
-      if (result.trade_error || result.cash_error) {
-        setError([result.trade_error && `Transaksi: ${result.trade_error}`, result.cash_error && `Mutasi kas: ${result.cash_error}`].filter(Boolean).join(' '))
-        setMessage('Sinkronisasi belum lengkap. Anda dapat mencoba lagi.')
-        return
-      }
-      setMessage(`${brokerName} tersinkron.`)
-      setShowForm(false)
       setCash('')
       setPin('')
-    } catch {
-      setError('Terjadi kesalahan saat memuat hasil. Coba sinkronkan ulang.')
+      const status = await api<GmailSyncStatusResponse>('/api/gmail/status')
+      if (!status.gmail_sync_enabled) {
+        await startGmailConnection('/setup', brokerName)
+        return
+      }
+      await syncSavedBroker(brokerName)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal menyiapkan sinkronisasi Gmail. Coba lagi.')
       setMessage('')
     } finally {
       busy.current = false
@@ -172,7 +199,7 @@ export default function SetupPage() {
               <label htmlFor="setup-pin">PIN trade confirmation</label>
               <input id="setup-pin" type="password" required={!existing} autoComplete="off" placeholder={existing ? 'Isi untuk memperbarui PIN' : undefined} value={pin} disabled={running} onChange={(event) => setPin(event.target.value)} />
             </>}
-            <button className="setup-secondary" type="submit" disabled={running || initialLoading}>{running ? 'Menyinkronkan…' : existing ? 'Sinkronkan ulang' : 'Hubungkan broker'}</button>
+            <button className="setup-secondary" type="submit" disabled={running || initialLoading}>{running ? 'Menyiapkan broker…' : existing ? 'Sinkronkan ulang' : 'Simpan broker'}</button>
           </form>}
 
           <div className="setup-feedback" aria-live="polite" aria-atomic="true">
