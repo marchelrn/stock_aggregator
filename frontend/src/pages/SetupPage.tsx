@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { usePortfolio } from '../context/PortfolioContext'
-import SetupFlowModal, { type ManualHolding } from '../components/SetupFlowModal'
+import SetupReview, { type ManualHolding } from '../components/SetupReview'
 import { startGmailConnection } from '../components/GmailConnection'
 import type { GmailSyncStatusResponse } from '../types'
 import { formatCurrency } from '../lib/formatters'
@@ -31,7 +31,7 @@ export default function SetupPage() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [elapsed, setElapsed] = useState(0)
-  const [review, setReview] = useState(false)
+  const review = location.pathname === '/setup/review'
   const [manualHoldings, setManualHoldings] = useState<ManualHolding[]>([])
   const [finishing, setFinishing] = useState(false)
   const [finishError, setFinishError] = useState('')
@@ -166,7 +166,7 @@ export default function SetupPage() {
           </ol>
         </nav>
       </header>
-      <div className="grid min-w-0 min-[1000px]:min-h-[calc(100dvh_-_5rem)] min-[1000px]:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+      {!review && <div className="grid min-w-0 min-[1000px]:min-h-[calc(100dvh_-_5rem)] min-[1000px]:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
         <section className="flex min-w-0 flex-col gap-8 px-5 py-8 min-[600px]:p-10 min-[1000px]:p-[clamp(2.5rem,5vw,5rem)]" aria-labelledby="setup-title">
           <div>
             <h1 className="mb-3 text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-tight tracking-tight" id="setup-title">Hubungkan broker</h1>
@@ -209,7 +209,7 @@ export default function SetupPage() {
           {error && <p className="mb-0 rounded-md border border-rose-700 bg-rose-50 p-4 text-rose-800 [overflow-wrap:anywhere]" role="alert">{error}</p>}
           <div className="grid gap-3">
             {!showForm && <button type="button" className="min-h-[2.875rem] cursor-pointer rounded-lg border px-4 py-3 font-semibold transition-colors motion-reduce:transition-none disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-600 border-slate-500 bg-white text-slate-700 enabled:hover:bg-slate-100 enabled:active:bg-slate-200" disabled={running} onClick={openForm}>Tambah broker lain</button>}
-            <button type="button" className="cursor-pointer rounded-lg border px-4 py-3 font-semibold transition-colors motion-reduce:transition-none disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-600 border-teal-700 bg-teal-700 text-white enabled:hover:bg-teal-800 enabled:active:bg-teal-900" disabled={running || initialLoading || state.brokers.length === 0} onClick={() => setReview(true)}>Continue</button>
+            <button type="button" className="cursor-pointer rounded-lg border px-4 py-3 font-semibold transition-colors motion-reduce:transition-none disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-200 disabled:text-slate-600 border-teal-700 bg-teal-700 text-white enabled:hover:bg-teal-800 enabled:active:bg-teal-900" disabled={running || initialLoading || state.brokers.length === 0} onClick={() => navigate('/setup/review')}>Continue</button>
           </div>
         </section>
 
@@ -230,8 +230,8 @@ export default function SetupPage() {
             </li>
           ))}</ul>}
         </aside>
-      </div>
-      {review && <SetupFlowModal stage="portfolio" running={false} steps={[]} elapsed={0} tradeSummary="" cashSummary="" tradeError={error} cashError="" holdings={state.holdings} brokers={state.brokers} manualHoldings={manualHoldings} finishing={finishing} finishError={finishError} onContinue={() => {}} onFinish={finishSetup} onClose={() => setReview(false)} onAddManual={(holding) => { setFinishError(''); setManualHoldings((prev) => [...prev, holding]) }} onRemoveManual={(index) => { setFinishError(''); setManualHoldings((prev) => prev.filter((_, position) => position !== index)) }} />}
+      </div>}
+      {review && (initialLoading ? <p role="status" className="p-5 text-center">Memuat portofolio…</p> : state.brokers.length === 0 ? <Navigate to="/setup" replace /> : <SetupReview syncError={error} holdings={state.holdings} brokers={state.brokers} manualHoldings={manualHoldings} finishing={finishing} finishError={finishError} onFinish={finishSetup} onBack={() => navigate('/setup')} onAddManual={(holding) => { setFinishError(''); setManualHoldings((prev) => [...prev, holding]) }} onRemoveManual={(index) => { setFinishError(''); setManualHoldings((prev) => prev.filter((_, position) => position !== index)) }} />)}
     </div>
   )
 }

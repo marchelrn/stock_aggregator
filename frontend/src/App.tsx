@@ -30,7 +30,7 @@ function Nav() {
   const location = useLocation()
   const navigate = useNavigate()
 
-  const isAuthRoute = location.pathname === '/login' || location.pathname === '/setup' || location.pathname === '/auth/gmail/callback'
+  const isAuthRoute = location.pathname === '/login' || (location.pathname === '/setup' || location.pathname === '/setup/review') || location.pathname === '/auth/gmail/callback'
   if (isAuthRoute) return null
 
   const userName = localStorage.getItem('userName')
@@ -92,7 +92,7 @@ export default function App() {
           <Route path="/auth/gmail/callback" element={<RequireAuth><GmailCallback /></RequireAuth>} />
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route
-            path="/setup"
+            path="/setup/review?"
             element={
               <RequireAuth>
                 <SetupPage />
