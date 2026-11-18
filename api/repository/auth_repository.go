@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"context"
+
 	"github.com/marchelrn/stock_api/models"
 	"gorm.io/gorm"
 )
@@ -57,4 +59,14 @@ func (r *AuthRepository) UpdateUser(user *models.Users) (*models.Users, error) {
 		return nil, err
 	}
 	return user, nil
+}
+
+// ListGmailSyncCandidates mengambil user aktif yang punya refresh token Gmail.
+// Penjadwal sync memakai daftar ini agar tidak menyentuh akun tanpa akses Gmail.
+func (r *AuthRepository) ListGmailSyncCandidates(ctx context.Context) ([]models.Users, error) {
+	var users []models.Users
+	err := r.db.WithContext(ctx).
+		Where("gmail_sync_enabled = ? AND gmail_refresh_token IS NOT NULL AND gmail_refresh_token <> ''", true).
+		Find(&users).Error
+	return users, err
 }

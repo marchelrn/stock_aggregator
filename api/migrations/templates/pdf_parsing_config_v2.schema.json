@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PDF and email parsing configuration v2",
+  "description": "Go/RE2 regex patterns with one-based capture groups. Version 2 adds explicit routing: document, kind and parse_mode. A template either lets the metadata engine parse (parse_mode metadata) or names a built-in extractor (parse_mode legacy) while still owning discovery selectors. Cash and dividend emails use the email section. Version 1 configs remain valid and mean: document pdf, kind trade, parse_mode metadata.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schema_version": {"const": 2},
+    "document": {"enum": ["pdf", "email_body"], "description": "Input the template reads. trade requires pdf; cash and dividend require email_body."},
+    "kind": {"enum": ["trade", "cash", "dividend"]},
+    "sender_domain": {"type": "string", "description": "Exact parsed sender domain, not a substring of the From header."},
+    "subject_pattern": {"type": "string", "minLength": 1, "description": "Local RE2 subject classifier. Discovery uses sender/subject selectors, not this regex."},
+    "filename_pattern": {"type": "string", "minLength": 1},
+    "exclude_filename_pattern": {"type": "string", "minLength": 1},
+    "parse_mode": {
+      "enum": ["metadata", "legacy"],
+      "description": "metadata runs the generic engine from this config. legacy hands extraction to the named built-in extractor but keeps discovery and routing in the database."
+    },
+    "legacy_parser": {
+      "enum": ["stockbit", "trimegah", "mandiri", "eipo"],
+      "description": "Required when parse_mode is legacy."
+    },
+    "discovery_only": {
+      "type": "boolean",
+      "description": "Use this row only for Gmail discovery; never route or extract with it."
+    },
+    "required_markers": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "date": {
+      "type": "object", "additionalProperties": false,
+      "required": ["pattern", "group", "layout"],
+      "properties": {
+        "pattern": {"type": "string", "minLength": 1},
+        "group": {"type": "integer", "minimum": 1},
+        "layout": {"type": "string", "minLength": 1}
+      }
+    },
+    "table": {
+      "type": "object", "additionalProperties": false,
+      "required": ["start_pattern", "end_pattern", "row_pattern", "fields"],
+      "properties": {
+        "start_pattern": {"type": "string", "minLength": 1},
+        "end_pattern": {"type": "string", "minLength": 1},
+        "row_pattern": {"type": "string", "minLength": 1},
+        "fields": {
+          "type": "object", "additionalProperties": false,
+          "required": ["ticker", "quantity", "price"],
+          "properties": {
+            "ticker": {"type": "integer", "minimum": 1},
+            "lot": {"type": "integer", "minimum": 1},
+            "quantity": {"type": "integer", "minimum": 1},
+            "price": {"type": "integer", "minimum": 1},
+            "buy_amount": {"type": "integer", "minimum": 1},
+            "sell_amount": {"type": "integer", "minimum": 1},
+            "side": {"type": "integer", "minimum": 1},
+            "amount": {"type": "integer", "minimum": 1},
+            "ref": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "numbers": {
+      "type": "object", "additionalProperties": false,
+      "required": ["decimal_separator", "thousands_separator", "grouping_size"],
+      "properties": {
+        "decimal_separator": {"type": "string", "minLength": 1, "maxLength": 1},
+        "thousands_separator": {"type": "string", "maxLength": 1},
+        "grouping_size": {"type": "integer", "minimum": 1, "maximum": 9}
+      }
+    },
+    "shares_per_lot": {"type": "integer", "minimum": 1},
+    "trade": {
+      "type": "object", "additionalProperties": false,
+      "required": ["extraction", "fee_allocation", "sell_amount"],
+      "properties": {
+        "extraction": {"enum": ["plain", "layout"]},
+        "ignore_patterns": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "Explicit RE2 patterns for repeated PDF page furniture, replaced with a newline before table parsing."},
+		"password_source": {"enum": ["broker"], "description": "Resolve the encrypted PDF password from the user's broker credential; never store passwords in template config."},
+        "date_replacements": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+        "side_values": {"type": "object", "additionalProperties": {"enum": ["BUY", "SELL"]}},
+        "reference_fields": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object", "additionalProperties": false,
+            "required": ["source", "pattern", "group"],
+            "properties": {
+              "source": {"enum": ["body", "subject", "filename"]},
+              "pattern": {"type": "string", "minLength": 1},
+              "group": {"type": "integer", "minimum": 1}
+            }
+          }
+        },
+        "ref_template": {"type": "string"},
+        "fee_allocation": {"enum": ["side", "all"]},
+        "buy_fallback_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "sell_fallback_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "sell_amount": {"enum": ["add", "subtract"]},
+        "fees": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["pattern"],
+            "properties": {
+              "pattern": {"type": "string", "minLength": 1},
+              "buy_group": {"type": "integer", "minimum": 1},
+              "sell_group": {"type": "integer", "minimum": 1},
+              "total_group": {"type": "integer", "minimum": 1}
+            }
+          }
+        }
+      }
+    },
+    "email": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "amount_pattern", "amount_group"],
+      "properties": {
+        "type": {"enum": ["deposit", "withdraw", "dividend"]},
+        "amount_pattern": {"type": "string", "minLength": 1},
+        "amount_group": {"type": "integer", "minimum": 1},
+        "date_pattern": {"type": "string", "minLength": 1},
+        "date_group": {"type": "integer", "minimum": 1},
+        "date_layout": {"type": "string", "minLength": 1},
+        "ref_pattern": {"type": "string", "minLength": 1},
+        "ref_group": {"type": "integer", "minimum": 1},
+        "ticker_pattern": {"type": "string", "minLength": 1},
+        "ticker_group": {"type": "integer", "minimum": 1},
+        "ticker_source": {"enum": ["subject", "body"]},
+        "date_replacements": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+        "description": {"type": "string"}
+      }
+    },
+    "ref_template": {
+      "type": "string",
+      "description": "Optional reference builder for cash and dividend events. Allowed placeholders: {ticker}, {paydate}, {ref}."
+    }
+  },
+  "allOf": [
+    {
+      "if": {"required": ["parse_mode"], "properties": {"parse_mode": {"const": "legacy"}}},
+      "then": {"required": ["legacy_parser"], "properties": {"kind": {"const": "trade"}, "document": {"const": "pdf"}}}
+    },
+    {
+      "if": {"required": ["kind"], "properties": {"kind": {"enum": ["cash", "dividend"]}}},
+      "then": {
+        "required": ["document"],
+        "properties": {"document": {"const": "email_body"}},
+        "if": {"not": {"required": ["discovery_only"], "properties": {"discovery_only": {"const": true}}}},
+        "then": {"required": ["email", "numbers"]}
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"const": "trade"}, "parse_mode": {"const": "metadata"}}, "not": {"required": ["discovery_only"], "properties": {"discovery_only": {"const": true}}}},
+      "then": {"required": ["required_markers", "date", "table", "numbers", "shares_per_lot"]}
+    },
+    {
+      "if": {"required": ["kind"], "properties": {"kind": {"const": "dividend"}}},
+      "then": {"properties": {"email": {"properties": {"type": {"const": "dividend"}}}}}
+    },
+    {
+      "if": {"required": ["kind"], "properties": {"kind": {"const": "cash"}}},
+      "then": {"properties": {"email": {"properties": {"type": {"enum": ["deposit", "withdraw"]}}}}}
+    },
+    {
+      "if": {"not": {"required": ["trade"]}},
+      "then": {"properties": {"table": {"properties": {"fields": {"required": ["ticker", "lot", "quantity", "price", "buy_amount", "sell_amount"]}}}}}
+    }
+  ]
+}

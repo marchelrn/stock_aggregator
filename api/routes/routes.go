@@ -116,6 +116,7 @@ func SetupRoutes(s *contract.Service) *gin.Engine {
 		// Market & Gmail sync routes
 		protected.GET("/api/market/:ticker", yahooController.GetMarket)
 		protected.POST("/api/gmail/sync", gmailController.SyncTradeConfirmations)
+		protected.POST("/api/gmail/setup-sync", gmailController.SyncSetupHistorical)
 		protected.POST("/api/gmail/sync-cash", gmailController.SyncCashMutations)
 		protected.GET("/api/gmail/cash-mutations", gmailController.GetCashMutations)
 		protected.GET("/api/gmail/status", gmailController.GetSyncStatus)

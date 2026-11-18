@@ -2,6 +2,7 @@ package parser
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"regexp"
@@ -18,6 +19,12 @@ type MandiriParser struct{}
 
 func NewMandiriParser() *MandiriParser {
 	return &MandiriParser{}
+}
+
+// ParseEmail lets a database template route Mandiri through the shared
+// dispatcher. The layout does not depend on email headers.
+func (p *MandiriParser) ParseEmail(_ context.Context, data []byte, _ EmailMetadata) ([]dto.ParsedTrade, error) {
+	return p.Parse(data)
 }
 
 func (p *MandiriParser) BrokerName() string {
@@ -118,13 +125,13 @@ func (p *MandiriParser) parseContent(content string) ([]dto.ParsedTrade, error) 
 			lot = int(shares) // If shares < 100, treat as lot count
 		}
 
-		grossAmount := shares * price  // = lot × 100 × price
+		grossAmount := shares * price // = lot × 100 × price
 
 		// Extract tax from the document content
 
-		tax := extractTax(content, taxPattern)  // Extract tax using regex pattern
+		tax := extractTax(content, taxPattern) // Extract tax using regex pattern
 
-		amountDone := grossAmount + tax  // amount_done includes tax
+		amountDone := grossAmount + tax // amount_done includes tax
 
 		trade := dto.ParsedTrade{
 			Ticker:     ticker,

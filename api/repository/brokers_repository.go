@@ -105,8 +105,13 @@ func (r *BrokersRepository) UpdateBrokerData(userID uint, id int, payload *model
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND id = ?", userID, id).First(&broker).Error; err != nil {
 			return err
 		}
-		if err := prepareCashBaseline(tx, userID, &broker); err != nil {
-			return err
+		if payload.PDFPasswordEncrypted == "" || payload.Cash > 0 {
+			if err := prepareCashBaseline(tx, userID, &broker); err != nil {
+				return err
+			}
+		}
+		if payload.PDFPasswordEncrypted != "" {
+			broker.PDFPasswordEncrypted = payload.PDFPasswordEncrypted
 		}
 		if payload.Name != "" {
 			broker.Name = payload.Name

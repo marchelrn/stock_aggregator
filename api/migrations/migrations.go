@@ -32,7 +32,14 @@ func getMigrations() []migration {
 		getAddTrimegahTemplate(),
 		getCreateProcessedGmailMessagesTable(),
 		getDisableLegacyTrimegahDiscoveryTemplate(),
+		getUpgradePDFTemplatesV2(),
 		getAnchorCashToRegistration(),
+		getAddMetadataCashTemplates(),
+		&RefineMetadataCashSubjects{},
+		&PromoteMetadataTradeTemplates{},
+		&RefineStockbitDepositSubject{},
+		&AddMandiriTradeTemplate{},
+		&RefineMandiriPageBreaks{},
 	}
 }
 

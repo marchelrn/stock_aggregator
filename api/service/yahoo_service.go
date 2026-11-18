@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -42,7 +43,7 @@ func (s *YahooService) GetPrice(ticker string) (*models.StockPrice, error) {
 
 	if s.YahooRepository != nil {
 		if cached, err := s.YahooRepository.GetPrice(ticker); err == nil && cached != nil {
-			if time.Since(cached.UpdatedAt) < 5*time.Minute {
+			if cached.Price > 0 && !math.IsNaN(cached.Price) && !math.IsInf(cached.Price, 0) && time.Since(cached.UpdatedAt) < 5*time.Minute {
 				if cached.Sector == "" {
 					if sec, err := s.GetSector(ticker); err == nil && sec != "" {
 						cached.Sector = sec
@@ -76,6 +77,9 @@ func (s *YahooService) GetPrice(ticker string) (*models.StockPrice, error) {
 		return nil, fmt.Errorf("failed to fetch price for %s: %w", ticker, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Yahoo price request for %s returned HTTP %d", ticker, resp.StatusCode)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -96,6 +100,9 @@ func (s *YahooService) GetPrice(ticker string) (*models.StockPrice, error) {
 	}
 
 	meta := data.Chart.Result[0].Meta
+	if meta.RegularMarketPrice <= 0 || math.IsNaN(meta.RegularMarketPrice) || math.IsInf(meta.RegularMarketPrice, 0) {
+		return nil, fmt.Errorf("Yahoo returned no valid market price for %s", ticker)
+	}
 	change := meta.RegularMarketPrice - meta.PreviousClose
 	changePct := 0.0
 	if meta.PreviousClose > 0 {

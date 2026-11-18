@@ -51,6 +51,47 @@ func (c *GmailController) SyncTradeConfirmations(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, response)
 }
 
+// SyncSetupHistorical menjalankan sync historis setelah user menyimpan broker
+// pada setup awal. Transaksi saham diambil penuh (tanpa checkpoint), lalu
+// mutasi kas disusul. Kegagalan salah satu tahap dilaporkan terpisah agar UI
+// bisa menampilkan langkah mana yang gagal.
+func (c *GmailController) SyncSetupHistorical(ctx *gin.Context) {
+	userID, exists := ctx.Get("user_id")
+	if !exists {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	uid, ok := userID.(float64)
+	if !ok {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	response := gin.H{}
+	tradeResponse, tradeErr := c.service.Gmail.SyncTradeConfirmationsFullContext(ctx, uint(uid))
+	if tradeErr != nil {
+		response["trade_error"] = tradeErr.Error()
+	} else {
+		response["trade_sync"] = tradeResponse
+	}
+
+	cashResponse, cashErr := c.service.Gmail.SyncCashMutationsContext(ctx, uint(uid))
+	if cashErr != nil {
+		response["cash_error"] = cashErr.Error()
+	} else {
+		response["cash_sync"] = cashResponse
+	}
+
+	// Kalau dua-duanya gagal, penyebabnya biasanya token Gmail tidak valid.
+	if tradeErr != nil && cashErr != nil {
+		ctx.JSON(errs.GetStatusCode(tradeErr), response)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, response)
+}
+
 // GetSyncStatus returns the current Gmail sync status for the authenticated user
 func (c *GmailController) GetSyncStatus(ctx *gin.Context) {
 	userID, exists := ctx.Get("user_id")

@@ -58,6 +58,7 @@ type BrokersData struct {
 }
 
 type BrokerRequest struct {
+	Pin  string  `json:"pin"`
 	Id   int     `json:"id"`
 	Name string  `json:"name" `
 	Cash float64 `json:"cash"`

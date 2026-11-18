@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/marchelrn/stock_api/config"
 	"github.com/marchelrn/stock_api/contract"
 	"github.com/marchelrn/stock_api/dto"
 	"github.com/marchelrn/stock_api/models"
 	errs "github.com/marchelrn/stock_api/pkg/error"
+	"github.com/marchelrn/stock_api/utils"
 	"gorm.io/gorm"
 )
 
@@ -203,6 +205,13 @@ func (s *BrokersService) AddBrokerData(userID uint, payload *dto.BrokerRequest) 
 		Name:   payload.Name,
 		Cash:   payload.Cash,
 	}
+	if payload.Pin != "" {
+		encrypted, err := utils.Encrypt(payload.Pin, config.GetConfig().EncryptionKey)
+		if err != nil {
+			return nil, errs.InternalServerError("Gagal menyimpan password PDF")
+		}
+		broker.PDFPasswordEncrypted = encrypted
+	}
 
 	brokerModels, err := s.BrokersRepository.AddBrokerData(broker)
 	if err != nil {
@@ -249,11 +258,19 @@ func (s *BrokersService) UpdateBrokerData(userID uint, id int, payload *dto.Brok
 		payload.Cash = 0
 	}
 
-	broker, err := s.BrokersRepository.UpdateBrokerData(userID, id, &models.Broker{
+	update := &models.Broker{
 		UserID: userID,
 		Name:   payload.Name,
 		Cash:   payload.Cash,
-	})
+	}
+	if payload.Pin != "" {
+		encrypted, err := utils.Encrypt(payload.Pin, config.GetConfig().EncryptionKey)
+		if err != nil {
+			return nil, errs.InternalServerError("Gagal menyimpan password PDF")
+		}
+		update.PDFPasswordEncrypted = encrypted
+	}
+	broker, err := s.BrokersRepository.UpdateBrokerData(userID, id, update)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errs.NotFound("Failed to update Broker : Broker Not Found")

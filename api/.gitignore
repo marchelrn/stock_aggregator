@@ -27,3 +27,4 @@ Stocks.zip
 __pycache__/
 *.pyc
 .claude/
+temp

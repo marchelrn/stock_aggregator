@@ -204,6 +204,22 @@ export interface CashMutationsResponse {
   Message?: string
 }
 
+export interface GmailCashSyncResponse {
+  status_code: number
+  message: string
+  mutations_found: number
+  mutations_synced: number
+  parsed_mutations: ParsedCashMutationItem[]
+}
+
+/** Hasil sync historis saat setup: tiap tahap bisa berhasil atau gagal sendiri. */
+export interface SetupSyncResponse {
+  trade_sync?: GmailSyncResponse
+  cash_sync?: GmailCashSyncResponse
+  trade_error?: string
+  cash_error?: string
+}
+
 export interface ParsedCashMutationItem {
   broker_name: string
   type: string

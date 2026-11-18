@@ -30,22 +30,76 @@ type TemplateStore interface {
 }
 
 type EmailMetadata struct {
-	From     string
-	Subject  string
-	Filename string
+	From       string
+	Subject    string
+	Filename   string
+	FromDomain string
 }
 
-// MetadataConfig is the version 1 JSON contract. Patterns use Go/RE2 syntax;
-// capture indexes are one-based. Every non-whitespace table byte must belong
-// to a complete row, so malformed rows cannot be silently skipped.
+const (
+	DocumentPDF       = "pdf"
+	DocumentEmailBody = "email_body"
+
+	KindTrade    = "trade"
+	KindCash     = "cash"
+	KindDividend = "dividend"
+
+	ParseModeMetadata = "metadata"
+	ParseModeLegacy   = "legacy"
+)
+
+// LegacyParserNames lists the built-in extractors a version 2 legacy template
+// may reference. Routing lives in the database; extraction stays in code until
+// the broker's metadata template reaches parity.
+var LegacyParserNames = map[string]bool{
+	"stockbit": true,
+	"trimegah": true,
+	"mandiri":  true,
+	"eipo":     true,
+}
+
+// MetadataConfig is the JSON contract for templates. Version 1 keeps its
+// original meaning: a trade table in a PDF parsed by the metadata engine.
+// Version 2 adds an explicit document/kind/parse_mode so the database can also
+// route legacy extractors and describe cash or dividend emails.
 type MetadataConfig struct {
-	Schema          string          `json:"$schema,omitempty"`
-	SchemaVersion   int             `json:"schema_version"`
-	RequiredMarkers []string        `json:"required_markers"`
-	Date            MetadataDate    `json:"date"`
-	Table           MetadataTable   `json:"table"`
-	Numbers         MetadataNumbers `json:"numbers"`
-	SharesPerLot    int             `json:"shares_per_lot"`
+	Schema                 string          `json:"$schema,omitempty"`
+	SchemaVersion          int             `json:"schema_version"`
+	Document               string          `json:"document,omitempty"`
+	Kind                   string          `json:"kind,omitempty"`
+	ParseMode              string          `json:"parse_mode,omitempty"`
+	LegacyParser           string          `json:"legacy_parser,omitempty"`
+	DiscoveryOnly          bool            `json:"discovery_only,omitempty"`
+	RequiredMarkers        []string        `json:"required_markers,omitempty"`
+	Date                   MetadataDate    `json:"date"`
+	Table                  MetadataTable   `json:"table"`
+	Numbers                MetadataNumbers `json:"numbers"`
+	SharesPerLot           int             `json:"shares_per_lot"`
+	Email                  *MetadataEmail  `json:"email,omitempty"`
+	RefTemplate            string          `json:"ref_template,omitempty"`
+	SenderDomain           string          `json:"sender_domain,omitempty"`
+	SubjectPattern         string          `json:"subject_pattern,omitempty"`
+	Trade                  *MetadataTrade  `json:"trade,omitempty"`
+	FilenamePattern        string          `json:"filename_pattern,omitempty"`
+	ExcludeFilenamePattern string          `json:"exclude_filename_pattern,omitempty"`
+}
+
+// MetadataEmail describes how to read a cash or dividend email body. Only
+// templates with document "email_body" use this section.
+type MetadataEmail struct {
+	Type             string            `json:"type"` // deposit, withdraw or dividend
+	AmountPattern    string            `json:"amount_pattern"`
+	AmountGroup      int               `json:"amount_group"`
+	DatePattern      string            `json:"date_pattern,omitempty"`
+	DateGroup        int               `json:"date_group,omitempty"`
+	DateLayout       string            `json:"date_layout,omitempty"`
+	RefPattern       string            `json:"ref_pattern,omitempty"`
+	RefGroup         int               `json:"ref_group,omitempty"`
+	TickerPattern    string            `json:"ticker_pattern,omitempty"`
+	TickerGroup      int               `json:"ticker_group,omitempty"`
+	Description      string            `json:"description,omitempty"`
+	TickerSource     string            `json:"ticker_source,omitempty"`
+	DateReplacements map[string]string `json:"date_replacements,omitempty"`
 }
 
 type MetadataDate struct {
@@ -85,29 +139,89 @@ func (p *MetadataParser) ParseEmail(ctx context.Context, data []byte, meta Email
 // should configure selectors before discovery across a broad mailbox. Subject
 // values are substrings for local matching, not Gmail search expressions.
 func (p *MetadataParser) EmailSelectors(ctx context.Context) ([]EmailMetadata, error) {
+	return p.emailSelectors(ctx, nil)
+}
+
+// EmailSelectorsForKinds projects only templates whose kind is listed, so the
+// trade query never picks up cash selectors and vice versa. An empty kinds list
+// returns every active template, matching EmailSelectors.
+func (p *MetadataParser) EmailSelectorsForKinds(ctx context.Context, kinds ...string) ([]EmailMetadata, error) {
+	if len(kinds) == 0 {
+		return p.emailSelectors(ctx, nil)
+	}
+	allowed := make(map[string]bool, len(kinds))
+	for _, kind := range kinds {
+		allowed[kind] = true
+	}
+	return p.emailSelectors(ctx, allowed)
+}
+
+func (p *MetadataParser) emailSelectors(ctx context.Context, kinds map[string]bool) ([]EmailMetadata, error) {
 	templates, err := p.load(ctx)
 	if err != nil {
 		return nil, err
 	}
 	selectors := make([]EmailMetadata, 0, len(templates))
+	seen := make(map[EmailMetadata]bool, len(templates))
 	for _, template := range templates {
-		selectors = append(selectors, EmailMetadata{
-			From:     template.template.EmailSender,
-			Subject:  template.template.SubjectContains,
-			Filename: template.template.FilenameSuffix,
-		})
+		if kinds != nil && !kinds[template.kind] {
+			continue
+		}
+		selector := EmailMetadata{
+			From:       template.template.EmailSender,
+			Subject:    template.template.SubjectContains,
+			Filename:   template.template.FilenameSuffix,
+			FromDomain: template.config.SenderDomain,
+		}
+		if seen[selector] {
+			continue
+		}
+		seen[selector] = true
+		selectors = append(selectors, selector)
 	}
 	return selectors, nil
 }
 
 type compiledMetadata struct {
-	template models.PDFParsingTemplate
-	config   MetadataConfig
-	markers  []*regexp.Regexp
-	date     *regexp.Regexp
-	start    *regexp.Regexp
-	end      *regexp.Regexp
-	row      *regexp.Regexp
+	template      models.PDFParsingTemplate
+	config        MetadataConfig
+	document      string
+	kind          string
+	parseMode     string
+	legacyParser  string
+	discoveryOnly bool
+
+	markers []*regexp.Regexp
+	date    *regexp.Regexp
+	start   *regexp.Regexp
+	end     *regexp.Regexp
+	row     *regexp.Regexp
+
+	emailAmount     *regexp.Regexp
+	emailDate       *regexp.Regexp
+	emailRef        *regexp.Regexp
+	emailTicker     *regexp.Regexp
+	emailType       string
+	subject         *regexp.Regexp
+	filename        *regexp.Regexp
+	excludeFilename *regexp.Regexp
+	tradeFees       []*regexp.Regexp
+	tradeRefs       map[string]*regexp.Regexp
+}
+
+func (c *compiledMetadata) hasSelector() bool {
+	t := c.template
+	return t.EmailSender != "" || t.SubjectContains != "" || t.FilenameSuffix != "" || c.config.SenderDomain != "" || c.config.SubjectPattern != "" || c.config.FilenamePattern != ""
+}
+
+// parseableTrade reports whether the metadata engine is allowed to extract a
+// trade table from a PDF for this template. Legacy and discovery-only rows are
+// handled by the dispatcher instead.
+func (c *compiledMetadata) parseableTrade() bool {
+	return c.kind == KindTrade &&
+		c.document == DocumentPDF &&
+		c.parseMode == ParseModeMetadata &&
+		!c.discoveryOnly
 }
 
 func (p *MetadataParser) load(ctx context.Context) ([]compiledMetadata, error) {
@@ -160,27 +274,129 @@ func compileMetadata(t models.PDFParsingTemplate) (compiledMetadata, error) {
 	if strings.TrimSpace(t.Key) == "" || strings.TrimSpace(t.BrokerName) == "" || t.Version < 1 {
 		return c, errors.New("key, broker name and positive template version required")
 	}
-	if cfg.SchemaVersion != 1 || len(cfg.RequiredMarkers) == 0 || cfg.SharesPerLot <= 0 {
-		return c, errors.New("schema_version must be 1; markers and positive shares_per_lot required")
+
+	switch cfg.SchemaVersion {
+	case 1:
+		// Version 1 predates routing metadata: it always describes a trade
+		// table parsed by the metadata engine. Explicit overrides are rejected
+		// below instead of being silently ignored.
+		if cfg.Document == "" {
+			cfg.Document = DocumentPDF
+		}
+		if cfg.Kind == "" {
+			cfg.Kind = KindTrade
+		}
+		if cfg.ParseMode == "" {
+			cfg.ParseMode = ParseModeMetadata
+		}
+	case 2:
+		if cfg.Document == "" {
+			cfg.Document = DocumentPDF
+		}
+		if cfg.Kind == "" {
+			cfg.Kind = KindTrade
+		}
+		if cfg.ParseMode == "" {
+			cfg.ParseMode = ParseModeMetadata
+		}
+	default:
+		return c, errors.New("schema_version must be 1 or 2")
 	}
-	compile := func(pattern string) (*regexp.Regexp, error) {
-		if strings.TrimSpace(pattern) == "" {
-			return nil, errors.New("empty pattern")
-		}
-		r, err := regexp.Compile(pattern)
+
+	c.config = cfg
+	c.document = cfg.Document
+	c.kind = cfg.Kind
+	c.parseMode = cfg.ParseMode
+	c.discoveryOnly = cfg.DiscoveryOnly
+	c.legacyParser = strings.ToLower(strings.TrimSpace(cfg.LegacyParser))
+	if cfg.SenderDomain != "" && !ValidSenderDomain(cfg.SenderDomain) {
+		return c, errors.New("invalid sender_domain")
+	}
+	if cfg.SubjectPattern != "" {
+		var err error
+		c.subject, err = compilePattern(cfg.SubjectPattern)
 		if err != nil {
-			return nil, errors.New("invalid regular expression")
+			return c, fmt.Errorf("subject_pattern: %w", err)
 		}
-		if r.MatchString("") {
-			return nil, errors.New("pattern must not match empty text")
+	}
+	for _, field := range []struct {
+		pattern string
+		target  **regexp.Regexp
+	}{
+		{cfg.FilenamePattern, &c.filename}, {cfg.ExcludeFilenamePattern, &c.excludeFilename},
+	} {
+		if field.pattern != "" {
+			var err error
+			*field.target, err = compilePattern(field.pattern)
+			if err != nil {
+				return c, fmt.Errorf("filename pattern: %w", err)
+			}
 		}
-		return r, nil
+	}
+
+	if c.document != DocumentPDF && c.document != DocumentEmailBody {
+		return c, errors.New("document must be pdf or email_body")
+	}
+	if c.kind != KindTrade && c.kind != KindCash && c.kind != KindDividend {
+		return c, errors.New("kind must be trade, cash or dividend")
+	}
+	if c.parseMode != ParseModeMetadata && c.parseMode != ParseModeLegacy {
+		return c, errors.New("parse_mode must be metadata or legacy")
+	}
+	if c.parseMode == ParseModeLegacy && !LegacyParserNames[c.legacyParser] {
+		return c, errors.New("legacy_parser must name a built-in extractor")
+	}
+	if cfg.SchemaVersion == 1 && (c.document != DocumentPDF || c.kind != KindTrade || c.parseMode != ParseModeMetadata) {
+		return c, errors.New("version 1 config cannot override document, kind or parse_mode")
+	}
+	if cfg.SchemaVersion < 2 && c.discoveryOnly {
+		return c, errors.New("discovery_only requires schema_version 2")
+	}
+	if c.hasSelector() {
+		if t.EmailSender != "" {
+			address, err := mail.ParseAddress(t.EmailSender)
+			if err != nil || !strings.EqualFold(address.Address, t.EmailSender) {
+				return c, errors.New("email_sender must be a bare mailbox address")
+			}
+		}
+	} else if cfg.SchemaVersion >= 2 && !c.discoveryOnly {
+		// Version 2 rows take part in routing, so they need at least one hook.
+		return c, errors.New("at least one email selector required")
+	}
+
+	if c.discoveryOnly {
+		return c, nil
+	}
+	if c.kind != KindTrade && c.document != DocumentEmailBody {
+		return c, errors.New("cash and dividend templates must use document email_body")
+	}
+	if c.kind == KindTrade && c.document != DocumentPDF {
+		return c, errors.New("trade templates must use document pdf")
+	}
+	if c.parseMode == ParseModeLegacy {
+		if c.kind != KindTrade {
+			return c, errors.New("legacy parsing is only available for trade PDFs")
+		}
+		// Extraction stays in the built-in parser; only routing and discovery
+		// come from this template.
+		return c, nil
+	}
+	if c.kind != KindTrade {
+		return c.compileEmail()
+	}
+	return c.compileTrade()
+}
+
+func (c *compiledMetadata) compileTrade() (compiledMetadata, error) {
+	cfg := c.config
+	if len(cfg.RequiredMarkers) == 0 || cfg.SharesPerLot <= 0 {
+		return *c, errors.New("markers and positive shares_per_lot required")
 	}
 	var err error
 	for _, marker := range cfg.RequiredMarkers {
-		r, err := compile(marker)
+		r, err := compilePattern(marker)
 		if err != nil {
-			return c, fmt.Errorf("required marker: %w", err)
+			return *c, fmt.Errorf("required marker: %w", err)
 		}
 		c.markers = append(c.markers, r)
 	}
@@ -195,54 +411,193 @@ func compileMetadata(t models.PDFParsingTemplate) (compiledMetadata, error) {
 		{"table row", cfg.Table.RowPattern, &c.row},
 	}
 	for _, pattern := range patterns {
-		*pattern.target, err = compile(pattern.pattern)
+		*pattern.target, err = compilePattern(pattern.pattern)
 		if err != nil {
-			return c, fmt.Errorf("%s: %w", pattern.name, err)
+			return *c, fmt.Errorf("%s: %w", pattern.name, err)
 		}
 	}
 	if cfg.Date.Group < 1 || cfg.Date.Group > c.date.NumSubexp() || cfg.Date.Layout == "" {
-		return c, errors.New("invalid date capture group or layout")
+		return *c, errors.New("invalid date capture group or layout")
 	}
-	// A layout must encode a full calendar date, not silently default components.
-	a := time.Date(2001, 2, 3, 0, 0, 0, 0, time.UTC)
-	b := time.Date(2004, 11, 23, 0, 0, 0, 0, time.UTC)
-	for _, value := range []time.Time{a, b} {
-		parsed, e := time.Parse(cfg.Date.Layout, value.Format(cfg.Date.Layout))
-		if e != nil || parsed.Year() != value.Year() || parsed.Month() != value.Month() || parsed.Day() != value.Day() {
-			return c, errors.New("date layout must encode year, month and day")
-		}
+	if err := validateDateLayout(cfg.Date.Layout); err != nil {
+		return *c, err
+	}
+	if cfg.Trade != nil {
+		return c.compileGenericTrade()
 	}
 	fields := []string{"ticker", "lot", "quantity", "price", "buy_amount", "sell_amount"}
 	if len(cfg.Table.Fields) != len(fields) {
-		return c, errors.New("exactly six trade field mappings required")
+		return *c, errors.New("exactly six trade field mappings required")
 	}
 	used := make(map[int]bool)
 	for _, field := range fields {
 		group := cfg.Table.Fields[field]
 		if group < 1 || group > c.row.NumSubexp() || used[group] {
-			return c, fmt.Errorf("invalid or duplicate capture group for %s", field)
+			return *c, fmt.Errorf("invalid or duplicate capture group for %s", field)
 		}
 		used[group] = true
 	}
 	if err := cfg.Numbers.validate(); err != nil {
-		return c, err
+		return *c, err
 	}
-	if t.EmailSender != "" {
-		address, err := mail.ParseAddress(t.EmailSender)
-		if err != nil || !strings.EqualFold(address.Address, t.EmailSender) {
-			return c, errors.New("email_sender must be a bare mailbox address")
+	return *c, nil
+}
+
+func (c *compiledMetadata) compileEmail() (compiledMetadata, error) {
+	cfg := c.config
+	if cfg.Email == nil {
+		return *c, errors.New("email section required for cash and dividend templates")
+	}
+	email := cfg.Email
+	for _, marker := range cfg.RequiredMarkers {
+		pattern, err := compilePattern(marker)
+		if err != nil {
+			return *c, fmt.Errorf("required marker: %w", err)
+		}
+		c.markers = append(c.markers, pattern)
+	}
+	if email.TickerSource != "" && email.TickerSource != "subject" && email.TickerSource != "body" {
+		return *c, errors.New("ticker_source must be subject or body")
+	}
+	for key, value := range email.DateReplacements {
+		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+			return *c, errors.New("date replacements must be nonempty")
 		}
 	}
-	return c, nil
+	switch email.Type {
+	case "deposit", "withdraw", "dividend":
+	default:
+		return *c, errors.New("email type must be deposit, withdraw or dividend")
+	}
+	if c.kind == KindDividend && email.Type != "dividend" {
+		return *c, errors.New("dividend templates require email type dividend")
+	}
+	if c.kind == KindCash && email.Type == "dividend" {
+		return *c, errors.New("cash templates require email type deposit or withdraw")
+	}
+	var err error
+	c.emailAmount, err = compilePattern(email.AmountPattern)
+	if err != nil {
+		return *c, fmt.Errorf("email amount_pattern: %w", err)
+	}
+	if email.AmountGroup < 1 || email.AmountGroup > c.emailAmount.NumSubexp() {
+		return *c, errors.New("invalid email amount_group")
+	}
+	if email.DatePattern != "" {
+		c.emailDate, err = compilePattern(email.DatePattern)
+		if err != nil {
+			return *c, fmt.Errorf("email date_pattern: %w", err)
+		}
+		if email.DateGroup < 1 || email.DateGroup > c.emailDate.NumSubexp() {
+			return *c, errors.New("invalid email date_group")
+		}
+		if err := validateDateLayout(email.DateLayout); err != nil {
+			return *c, err
+		}
+	} else if email.DateGroup != 0 || email.DateLayout != "" {
+		return *c, errors.New("email date_group and date_layout require date_pattern")
+	}
+	if email.RefPattern != "" {
+		c.emailRef, err = compilePattern(email.RefPattern)
+		if err != nil {
+			return *c, fmt.Errorf("email ref_pattern: %w", err)
+		}
+		if email.RefGroup < 1 || email.RefGroup > c.emailRef.NumSubexp() {
+			return *c, errors.New("invalid email ref_group")
+		}
+	} else if email.RefGroup != 0 {
+		return *c, errors.New("email ref_group requires ref_pattern")
+	}
+	if email.TickerPattern != "" {
+		c.emailTicker, err = compilePattern(email.TickerPattern)
+		if err != nil {
+			return *c, fmt.Errorf("email ticker_pattern: %w", err)
+		}
+		if email.TickerGroup < 1 || email.TickerGroup > c.emailTicker.NumSubexp() {
+			return *c, errors.New("invalid email ticker_group")
+		}
+	} else if email.TickerGroup != 0 {
+		return *c, errors.New("email ticker_group requires ticker_pattern")
+	}
+	if c.config.RefTemplate != "" {
+		if err := validateRefTemplate(c.config.RefTemplate); err != nil {
+			return *c, err
+		}
+		if strings.Contains(c.config.RefTemplate, "{ticker}") && c.emailTicker == nil {
+			return *c, errors.New("ref_template ticker requires ticker_pattern")
+		}
+		if strings.Contains(c.config.RefTemplate, "{ref}") && c.emailRef == nil {
+			return *c, errors.New("ref_template ref requires ref_pattern")
+		}
+	}
+	c.emailType = email.Type
+	if err := cfg.Numbers.validate(); err != nil {
+		return *c, err
+	}
+	return *c, nil
+}
+
+func compilePattern(pattern string) (*regexp.Regexp, error) {
+	if strings.TrimSpace(pattern) == "" {
+		return nil, errors.New("empty pattern")
+	}
+	r, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, errors.New("invalid regular expression")
+	}
+	if r.MatchString("") {
+		return nil, errors.New("pattern must not match empty text")
+	}
+	return r, nil
+}
+
+// validateDateLayout requires a layout that encodes a full calendar date, so a
+// typo cannot silently default year, month or day.
+func validateDateLayout(layout string) error {
+	if layout == "" {
+		return errors.New("invalid date layout")
+	}
+	a := time.Date(2001, 2, 3, 0, 0, 0, 0, time.UTC)
+	b := time.Date(2004, 11, 23, 0, 0, 0, 0, time.UTC)
+	for _, value := range []time.Time{a, b} {
+		parsed, e := time.Parse(layout, value.Format(layout))
+		if e != nil || parsed.Year() != value.Year() || parsed.Month() != value.Month() || parsed.Day() != value.Day() {
+			return errors.New("date layout must encode year, month and day")
+		}
+	}
+	return nil
+}
+
+func validateRefTemplate(template string) error {
+	if len(template) > 120 {
+		return errors.New("ref_template is too long")
+	}
+	remainder := strings.NewReplacer("{ticker}", "", "{paydate}", "", "{ref}", "").Replace(template)
+	if strings.ContainsAny(remainder, "{}") {
+		return errors.New("unknown or malformed ref_template placeholder")
+	}
+	return nil
 }
 
 func (p *MetadataParser) parse(ctx context.Context, data []byte, meta *EmailMetadata) ([]dto.ParsedTrade, error) {
-	templates, err := p.load(ctx)
+	all, err := p.load(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	templates := make([]compiledMetadata, 0, len(all))
+	for _, template := range all {
+		if template.parseableTrade() {
+			templates = append(templates, template)
+		}
+	}
+	if len(templates) == 0 {
+		if meta != nil {
+			return nil, ErrEmailNotApplicable
+		}
+		return nil, errors.New("no active template matches")
 	}
 	if meta != nil {
 		var eligible []compiledMetadata
@@ -256,11 +611,39 @@ func (p *MetadataParser) parse(ctx context.Context, data []byte, meta *EmailMeta
 		}
 		templates = eligible
 	}
-	content, err := extractMetadataPDF(ctx, data)
-	if err != nil {
-		return nil, err
+	var selected *compiledMetadata
+	var selectedContent string
+	contents := map[string]string{}
+	for i := range templates {
+		c := &templates[i]
+		strategy := "plain"
+		if c.config.Trade != nil {
+			strategy = c.config.Trade.Extraction
+		}
+		content, ok := contents[strategy]
+		if !ok {
+			content, err = c.extractPDF(ctx, data)
+			if err != nil {
+				return nil, err
+			}
+			contents[strategy] = content
+		}
+		matches := true
+		for _, marker := range c.markers {
+			matches = matches && marker.MatchString(content)
+		}
+		if !matches {
+			continue
+		}
+		if selected != nil {
+			return nil, errors.New("ambiguous PDF: multiple active templates match")
+		}
+		selected, selectedContent = c, content
 	}
-	return parseMetadataContent(ctx, templates, content, meta)
+	if selected == nil {
+		return nil, errors.New("unmatched PDF: no active template matches")
+	}
+	return parseMetadataContent(ctx, []compiledMetadata{*selected}, selectedContent, meta)
 }
 
 func extractMetadataPDF(ctx context.Context, data []byte) (content string, err error) {
@@ -328,7 +711,13 @@ func parseMetadataContent(ctx context.Context, templates []compiledMetadata, con
 	if selected == nil {
 		return nil, errors.New("unmatched PDF: no active template matches")
 	}
-	trades, err := selected.parseTrades(content)
+	var trades []dto.ParsedTrade
+	var err error
+	if selected.config.Trade != nil {
+		trades, err = selected.parseGenericTrades(content, meta)
+	} else {
+		trades, err = selected.parseTrades(content)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("PDF template %q version %d: %w", selected.template.Key, selected.template.Version, err)
 	}
@@ -337,6 +726,25 @@ func parseMetadataContent(ctx context.Context, templates []compiledMetadata, con
 
 func (c *compiledMetadata) matchesEmail(meta EmailMetadata) bool {
 	t := c.template
+	if c.filename != nil && !c.filename.MatchString(meta.Filename) {
+		return false
+	}
+	if c.excludeFilename != nil && c.excludeFilename.MatchString(meta.Filename) {
+		return false
+	}
+	if c.config.SenderDomain != "" {
+		from, err := mail.ParseAddress(meta.From)
+		if err != nil {
+			return false
+		}
+		at := strings.LastIndex(from.Address, "@")
+		if at < 0 || !strings.EqualFold(from.Address[at+1:], c.config.SenderDomain) {
+			return false
+		}
+	}
+	if c.subject != nil && !c.subject.MatchString(meta.Subject) {
+		return false
+	}
 	if t.EmailSender != "" {
 		from, err := mail.ParseAddress(meta.From)
 		if err != nil || !strings.EqualFold(from.Address, t.EmailSender) {
@@ -345,6 +753,23 @@ func (c *compiledMetadata) matchesEmail(meta EmailMetadata) bool {
 	}
 	return strings.Contains(strings.ToLower(meta.Subject), strings.ToLower(t.SubjectContains)) &&
 		strings.HasSuffix(strings.ToLower(meta.Filename), strings.ToLower(t.FilenameSuffix))
+}
+
+func ValidSenderDomain(domain string) bool {
+	if len(domain) > 253 || !strings.Contains(domain, ".") {
+		return false
+	}
+	for _, label := range strings.Split(domain, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, r := range label {
+			if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (c *compiledMetadata) parseTrades(content string) ([]dto.ParsedTrade, error) {
