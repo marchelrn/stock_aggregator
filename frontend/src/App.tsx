@@ -1,10 +1,13 @@
 import { useEffect, type ReactNode } from 'react'
-import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { SquareArrowRightExit } from 'lucide-react'
 import DashboardPage from './pages/DashboardPage'
 import BrokersPage from './pages/BrokersPage'
 import MarketPage from './pages/MarketPage'
 import LoginPage from './pages/LoginPage'
+import NotFoundPage from './pages/NotFoundPage'
 import AuthCallback from './pages/AuthCallback'
+import GmailCallback from './pages/GmailCallback'
 import SetupPage from './pages/SetupPage'
 import { UNAUTHORIZED_EVENT } from './lib/api'
 import { clearSession, hasValidSession } from './lib/session'
@@ -29,8 +32,8 @@ function Nav() {
   const location = useLocation()
   const navigate = useNavigate()
 
-  const isAuthRoute = location.pathname === '/login' || location.pathname === '/setup'
-  if (isAuthRoute) return null
+  const isAuthRoute = location.pathname === '/login' || (location.pathname === '/setup' || location.pathname === '/setup/review') || location.pathname === '/auth/gmail/callback'
+  if (isAuthRoute || !isAuthenticated()) return null
 
   const userName = localStorage.getItem('userName')
 
@@ -62,7 +65,7 @@ function Nav() {
           onClick={logout}
           className="rounded-lg px-3 py-1.5 text-sm font-semibold text-rose-600 hover:bg-rose-50 transition"
         >
-          Logout
+          <SquareArrowRightExit/>
         </button>
       </div>
     </nav>
@@ -84,13 +87,13 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-white text-slate-800">
-      <Nav />
-      <main className="w-full py-7">
-        <Routes>
+      <Routes>
+        <Route element={<><Nav /><main className="w-full py-7"><Outlet /></main></>}>
           <Route path="/login" element={<LoginRoute />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/auth/gmail/callback" element={<RequireAuth><GmailCallback /></RequireAuth>} />
           <Route
-            path="/setup"
+            path="/setup/review?"
             element={
               <RequireAuth>
                 <SetupPage />
@@ -121,8 +124,9 @@ export default function App() {
               </RequireAuth>
             }
           />
-        </Routes>
-      </main>
+        </Route>
+        <Route path="*" element={<NotFoundPage authenticated={isAuthenticated()} setupCompleted={isSetupCompleted()} />} />
+      </Routes>
     </div>
   )
 }

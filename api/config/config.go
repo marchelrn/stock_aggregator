@@ -49,7 +49,6 @@ func Load() {
 		Scopes: []string{
 			"email",
 			"profile",
-			"https://www.googleapis.com/auth/gmail.readonly",
 		},
 		Endpoint: google.Endpoint,
 	}

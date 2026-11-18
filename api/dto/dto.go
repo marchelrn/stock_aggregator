@@ -239,6 +239,20 @@ type GmailSyncResponse struct {
 	ParsedTrades []ParsedTrade `json:"parsed_trades"`
 }
 
+const GmailOAuthStatePrefix = "gmail."
+
+type GmailConnectionStart struct {
+	URL      string `json:"url"`
+	State    string `json:"state"`
+	Verifier string `json:"verifier"`
+}
+
+type GmailConnectionRequest struct {
+	Code     string `json:"code" binding:"required"`
+	State    string `json:"state" binding:"required"`
+	Verifier string `json:"verifier" binding:"required,len=43"`
+}
+
 type GmailSyncStatusResponse struct {
 	StatusCode       int        `json:"status_code"`
 	Message          string     `json:"message"`

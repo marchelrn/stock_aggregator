@@ -4,7 +4,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/marchelrn/stock_api/contract"
@@ -67,13 +69,24 @@ func (c *AuthController) GoogleLogin(ctx *gin.Context) {
 }
 
 func (c *AuthController) GoogleCallback(ctx *gin.Context) {
+	stateQuery := ctx.Query("state")
+	if strings.HasPrefix(stateQuery, dto.GmailOAuthStatePrefix) {
+		result := url.Values{"state": {stateQuery}}
+		if code := ctx.Query("code"); code != "" && ctx.Query("error") == "" {
+			result.Set("code", code)
+		}
+		ctx.Header("Cache-Control", "no-store")
+		ctx.Header("Referrer-Policy", "no-referrer")
+		ctx.Redirect(http.StatusSeeOther, frontendAuthURL()+"/auth/gmail/callback#"+result.Encode())
+		return
+	}
+
 	stateCookie, err := ctx.Cookie("oauth_state")
 	if err != nil {
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "State coookie tidak ditemukan"})
 		return
 	}
 
-	stateQuery := ctx.Query("state")
 	if stateCookie != stateQuery {
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid OAuth state"})
 		return
@@ -91,14 +104,49 @@ func (c *AuthController) GoogleCallback(ctx *gin.Context) {
 		return
 	}
 
-	frontendURL := os.Getenv("FRONTEND_URL")
-	if frontendURL == "" {
-		frontendURL = "http://localhost:3000"
-	}
-
 	ctx.SetCookie("oauth_state", "", -1, "/", "", false, true)
 
-	ctx.Redirect(http.StatusTemporaryRedirect, frontendURL+"/auth/callback?token="+response.Token)
+	ctx.Redirect(http.StatusTemporaryRedirect, frontendAuthURL()+"/auth/callback?token="+response.Token)
+}
+
+func frontendAuthURL() string {
+	if frontendURL := os.Getenv("FRONTEND_URL"); frontendURL != "" {
+		return strings.TrimRight(frontendURL, "/")
+	}
+	return "http://localhost:3000"
+}
+
+func (c *AuthController) StartGmailConnection(ctx *gin.Context) {
+	id, ok := ctx.MustGet("user_id").(float64)
+	if !ok || id <= 0 {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Sesi tidak valid."})
+		return
+	}
+	result, err := c.service.Auth.StartGmailConnection(uint(id))
+	if err != nil {
+		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
+		return
+	}
+	ctx.Header("Cache-Control", "no-store")
+	ctx.JSON(http.StatusOK, result)
+}
+
+func (c *AuthController) CompleteGmailConnection(ctx *gin.Context) {
+	id, ok := ctx.MustGet("user_id").(float64)
+	if !ok || id <= 0 {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Sesi tidak valid."})
+		return
+	}
+	var request dto.GmailConnectionRequest
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Permintaan koneksi Gmail tidak lengkap."})
+		return
+	}
+	if err := c.service.Auth.CompleteGmailConnection(ctx.Request.Context(), uint(id), request); err != nil {
+		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
+		return
+	}
+	ctx.Status(http.StatusNoContent)
 }
 
 func (c *AuthController) GetUserInformation(ctx *gin.Context) {
