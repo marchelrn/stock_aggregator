@@ -48,19 +48,11 @@ export default function StockPrices({ prices = {}, onFetch, onClear }: StockPric
         />
         <button
           type="submit"
-          className="rounded-md bg-teal-700 px-2 py-2 text-xs font-semibold text-white hover:bg-teal-800"
+          aria-label="Search Prices"
+          className="inline-flex min-h-11 min-w-11 justify-center rounded-md bg-teal-700 px-2 py-2 text-white hover:bg-teal-800"
         >
-          <Search
-            size={36}
-            nonScalingStroke={true}
-            className="rounded-md bg-teal-700 px-2 py-2 font-semibold text-white hover:bg-teal-800"
-            aria-label='Search Prices'
-            onClick={handleSubmit}
-          />
+          <Search size={20} aria-hidden="true" />
         </button>
-
-
-
         <button
           type="button"
           className="rounded-lg bg-slate-500 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600"
