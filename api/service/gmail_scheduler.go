@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -12,8 +13,7 @@ import (
 )
 
 // GmailScheduler menjalankan sync Gmail incremental secara berkala untuk user
-// yang token Gmail-nya masih tersimpan. Jadwal mengikuti WITA (UTC+8) dan
-// dimulai saat pasar tutup agar transaksi hari itu sudah lengkap.
+// yang token Gmail-nya masih tersimpan. Jendela jam opsional mengikuti WITA (UTC+8).
 type GmailScheduler struct {
 	gmail contract.GmailService
 	auth  contract.AuthRepository
@@ -31,7 +31,7 @@ type GmailScheduler struct {
 // NewGmailScheduler membaca konfigurasi jam dari environment:
 //
 //	GMAIL_CRON_ENABLED     (default true)
-//	GMAIL_CRON_START_HOUR  (default 17, WITA)
+//	GMAIL_CRON_START_HOUR  (default 0, WITA)
 //	GMAIL_CRON_END_HOUR    (default 23, WITA)
 func NewGmailScheduler(gmail contract.GmailService, auth contract.AuthRepository) *GmailScheduler {
 	loc, err := time.LoadLocation("Asia/Makassar")
@@ -48,7 +48,7 @@ func NewGmailScheduler(gmail contract.GmailService, auth contract.AuthRepository
 		gmail:     gmail,
 		auth:      auth,
 		enabled:   enabled,
-		startHour: envHour("GMAIL_CRON_START_HOUR", 17),
+		startHour: envHour("GMAIL_CRON_START_HOUR", 0),
 		endHour:   envHour("GMAIL_CRON_END_HOUR", 23),
 		loc:       loc,
 	}
@@ -73,17 +73,44 @@ func (s *GmailScheduler) Start() {
 		log.Println("Penjadwal sync Gmail dimatikan (GMAIL_CRON_ENABLED=false)")
 		return
 	}
-	log.Printf("Penjadwal sync Gmail aktif setiap jam %02d:00-%02d:59 WITA", s.startHour, s.endHour)
-	go s.loop()
+	log.Printf("Penjadwal Gmail: tick berikut %s; trade confirmation tiap jam 17:00–23:00 WITA pada hari bursa", nextGmailHour(time.Now().In(s.loc)).Format(time.RFC3339))
+	go s.loop(context.Background())
 }
 
-func (s *GmailScheduler) loop() {
+func nextGmailHour(now time.Time) time.Time {
+	return now.Truncate(time.Hour).Add(time.Hour)
+}
+
+func (s *GmailScheduler) loop(ctx context.Context) {
 	for {
-		now := time.Now().In(s.loc)
-		next := now.Truncate(time.Hour).Add(time.Hour)
-		time.Sleep(time.Until(next))
-		s.runOnce(next.In(s.loc))
+		next := nextGmailHour(time.Now().In(s.loc))
+		timer := time.NewTimer(time.Until(next))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+			s.runOnce(next)
+		}
 	}
+}
+
+// Weekday equity-market closures from KSEI PENG-0002/DIR/KSEI/0126 and PENG-0004/DIR/KSEI/0926.
+var exchangeHolidays = map[int][]string{
+	2026: {"01-01", "01-16", "02-16", "02-17", "03-18", "03-19", "03-20", "03-23", "03-24", "04-03", "05-01", "05-14", "05-15", "05-27", "05-28", "06-01", "06-16", "08-17", "08-25", "12-24", "12-25", "12-31"},
+	2027: {"01-01", "01-05", "02-05", "03-08", "03-09", "03-10", "03-11", "03-12", "03-15", "03-25", "03-26", "05-06", "05-17", "05-18", "05-19", "05-20", "06-01", "08-17", "12-24", "12-31"},
+}
+
+func tradeConfirmationDue(at time.Time) bool {
+	if at.Hour() < 17 || at.Weekday() == time.Saturday || at.Weekday() == time.Sunday {
+		return false
+	}
+	holidays, ok := exchangeHolidays[at.Year()]
+	if !ok {
+		log.Printf("Kalender bursa %d belum tersedia; sinkronisasi TC dilewati", at.Year())
+		return false
+	}
+	return !slices.Contains(holidays, at.Format("01-02"))
 }
 
 // runOnce menjalankan satu putaran sync. Dipisah dari loop agar bisa diuji.
@@ -111,17 +138,16 @@ func (s *GmailScheduler) runOnce(at time.Time) {
 		return
 	}
 
-	log.Printf("Penjadwal sync Gmail: mulai putaran %02d:00 WITA untuk %d user", hour, len(users))
+	log.Printf("Penjadwal sync Gmail: mulai putaran %s WITA untuk %d user", at.Format("15:04"), len(users))
+	tradeDue := tradeConfirmationDue(at.In(s.loc))
 	for _, user := range users {
-		// Lewati user yang baru saja sync lewat tombol manual agar email yang
-		// sama tidak diproses dua kali.
-		if user.LastGmailSyncAt != nil && at.Sub(*user.LastGmailSyncAt) < 30*time.Minute {
-			log.Printf("Penjadwal sync Gmail: user %d baru sync, lewati", user.Id)
-			continue
+		if tradeDue {
+			if _, err := s.gmail.SyncTradeConfirmations(user.Id); err != nil {
+				log.Printf("Penjadwal sync Gmail: transaksi user %d gagal: %v", user.Id, err)
+			}
 		}
-
-		if _, err := s.gmail.SyncTradeConfirmations(user.Id); err != nil {
-			log.Printf("Penjadwal sync Gmail: transaksi user %d gagal: %v", user.Id, err)
+		if user.LastGmailSyncAt != nil && at.Sub(*user.LastGmailSyncAt) < 30*time.Minute {
+			continue
 		}
 		if _, err := s.gmail.SyncCashMutations(user.Id); err != nil {
 			log.Printf("Penjadwal sync Gmail: mutasi kas user %d gagal: %v", user.Id, err)

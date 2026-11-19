@@ -32,7 +32,7 @@ func Run() {
 
 	migrations.Up(sqlDB)
 
-	// Sync Gmail otomatis tiap jam pada jam pasar tutup (WITA).
+	// Sync Gmail otomatis tiap jam pada menit 00.
 	service.NewGmailScheduler(srv.Gmail, repo.Auth).Start()
 
 	serv := &http.Server{
