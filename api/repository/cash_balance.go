@@ -40,6 +40,9 @@ func MutationCashDelta(m *models.CashMutation) float64 {
 	case models.CashMutationDeposit, models.CashMutationDividend:
 		return m.Amount
 	case models.CashMutationWithdraw:
+		if m.AppliedDelta != nil {
+			return *m.AppliedDelta
+		}
 		return -m.Amount
 	}
 	return 0
