@@ -14,9 +14,13 @@ node_modules
 /OPTIMIZATION_REPORT.md
 /RINGKASAN*.md
 /checkpoint/
+skills-lock.json
+.agents/
 
 # Tests and investigation tools are maintained on the testing branch
 *_test.go
+!api/service/gmail_scheduler_test.go
+!api/repository/withdrawal_balance_test.go
 /frontend/tests/
 /api/cmd/test_*/
 /api/cmd/check_rlco_emails/

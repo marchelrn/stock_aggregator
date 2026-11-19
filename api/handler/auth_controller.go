@@ -1,11 +1,11 @@
 package handler
 
 import (
-	"crypto/rand"
-	"encoding/hex"
+	"golang.org/x/oauth2"
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -58,14 +58,10 @@ func (c *AuthController) Login(ctx *gin.Context) {
 }
 
 func (c *AuthController) GoogleLogin(ctx *gin.Context) {
-	stateBytes := make([]byte, 16)
-	rand.Read(stateBytes)
-	state := hex.EncodeToString(stateBytes)
-
-	ctx.SetCookie("oauth_state", state, 300, "/", "", false, true)
-
-	url := c.service.Auth.GetGoogleLoginURL(state)
-	ctx.Redirect(http.StatusTemporaryRedirect, url)
+	state := oauth2.GenerateVerifier()
+	verifier := oauth2.GenerateVerifier()
+	ctx.Header("Cache-Control", "no-store")
+	ctx.JSON(http.StatusOK, gin.H{"state": state, "verifier": verifier, "url": c.service.Auth.GetGoogleLoginURL(state, verifier)})
 }
 
 func (c *AuthController) GoogleCallback(ctx *gin.Context) {
@@ -81,32 +77,37 @@ func (c *AuthController) GoogleCallback(ctx *gin.Context) {
 		return
 	}
 
-	stateCookie, err := ctx.Cookie("oauth_state")
-	if err != nil {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "State coookie tidak ditemukan"})
+	if !loginNonce.MatchString(stateQuery) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Sesi login tidak valid."})
 		return
 	}
+	result := url.Values{"state": {stateQuery}}
+	if code := ctx.Query("code"); code != "" && ctx.Query("error") == "" {
+		result.Set("code", code)
+	}
+	ctx.Header("Cache-Control", "no-store")
+	ctx.Header("Referrer-Policy", "no-referrer")
+	ctx.Redirect(http.StatusSeeOther, frontendAuthURL()+"/auth/callback#"+result.Encode())
+}
 
-	if stateCookie != stateQuery {
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid OAuth state"})
+var loginNonce = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+
+func (c *AuthController) CompleteGoogleLogin(ctx *gin.Context) {
+	var req struct {
+		Code     string `json:"code" binding:"required"`
+		Verifier string `json:"verifier" binding:"required"`
+	}
+	ctx.Header("Cache-Control", "no-store")
+	if err := ctx.ShouldBindJSON(&req); err != nil || !loginNonce.MatchString(req.Verifier) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Permintaan login tidak valid."})
 		return
 	}
-
-	code := ctx.Query("code")
-	if code == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Authorization Code tidak ditemukan"})
-		return
-	}
-
-	response, err := c.service.Auth.GoogleLogin(code)
+	response, err := c.service.Auth.GoogleLogin(req.Code, req.Verifier)
 	if err != nil {
 		ctx.JSON(errs.GetStatusCode(err), gin.H{"error": err.Error()})
 		return
 	}
-
-	ctx.SetCookie("oauth_state", "", -1, "/", "", false, true)
-
-	ctx.Redirect(http.StatusTemporaryRedirect, frontendAuthURL()+"/auth/callback?token="+response.Token)
+	ctx.JSON(http.StatusOK, response)
 }
 
 func frontendAuthURL() string {

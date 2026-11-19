@@ -5,6 +5,7 @@ import { usePortfolio } from '../context/PortfolioContext'
 import SetupReview, { type ManualHolding } from '../components/SetupReview'
 import { startGmailConnection } from '../components/GmailConnection'
 import type { GmailSyncStatusResponse } from '../types'
+import ThemeToggle from '../components/ThemeToggle'
 import { formatCurrency } from '../lib/formatters'
 import { api } from '../lib/api'
 import { ChevronRightIcon } from 'lucide-react'
@@ -165,6 +166,7 @@ export default function SetupPage() {
             <li aria-current={review ? 'step' : undefined}>Review</li>
           </ol>
         </nav>
+        <div className="justify-self-center sm:justify-self-end"><ThemeToggle /></div>
       </header>
       {!review && <div className="grid min-w-0 min-[1000px]:min-h-[calc(100dvh_-_5rem)] min-[1000px]:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
         <section className="flex min-w-0 flex-col gap-8 px-5 py-8 min-[600px]:p-10 min-[1000px]:p-[clamp(2.5rem,5vw,5rem)]" aria-labelledby="setup-title">

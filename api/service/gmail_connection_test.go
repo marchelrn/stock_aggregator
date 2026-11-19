@@ -47,11 +47,11 @@ func TestGmailConnection(t *testing.T) {
 	config.Load()
 	service := &AuthService{}
 
-	loginURL, err := url.Parse(service.GetGoogleLoginURL("login-state"))
+	loginURL, err := url.Parse(service.GetGoogleLoginURL("login-state", "test-verifier"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if q := loginURL.Query(); q.Get("scope") != "email profile" || q.Has("prompt") || q.Has("access_type") {
+	if q := loginURL.Query(); q.Get("scope") != "email profile" || q.Has("prompt") || q.Has("access_type") || q.Get("code_challenge_method") != "S256" || q.Get("code_challenge") != oauth2.S256ChallengeFromVerifier("test-verifier") {
 		t.Fatalf("unexpected login parameters: %v", q)
 	}
 	start, err := service.StartGmailConnection(7)

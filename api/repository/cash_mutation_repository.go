@@ -48,6 +48,7 @@ func (r *CashMutationRepository) SyncCashMutationBatch(userID uint, mutations []
 			if !item.Date.After(registered) {
 				continue
 			}
+			item.AppliedDelta = nil
 			if item.Amount <= 0 || math.IsNaN(item.Amount) || math.IsInf(item.Amount, 0) || MutationCashDelta(item) == 0 {
 				return fmt.Errorf("cash mutation requires a supported type and a positive finite amount")
 			}
@@ -98,6 +99,10 @@ func (r *CashMutationRepository) SyncCashMutationBatch(userID uint, mutations []
 				return err
 			}
 
+			if item.Type == models.CashMutationWithdraw && item.Amount > broker.Cash {
+				delta := -broker.Cash
+				item.AppliedDelta = &delta
+			}
 			if err := tx.Create(item).Error; err != nil {
 				return err
 			}

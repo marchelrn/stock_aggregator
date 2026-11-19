@@ -2,6 +2,21 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      const systemTheme = matchMedia('(prefers-color-scheme: dark)')
+      function applyTheme() {
+        let theme
+        try {
+          theme = localStorage.getItem('portfolio-theme')
+        } catch {}
+        const dark = theme === 'dark' || (theme !== 'light' && systemTheme.matches)
+        document.documentElement.classList.toggle('dark', dark)
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+      }
+      applyTheme()
+      systemTheme.addEventListener('change', applyTheme)
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Stock Portfolio Dashboard</title>
     <link rel="icon" type="image/png" href="/src/assets/image/letter_m.png" />

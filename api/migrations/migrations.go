@@ -40,6 +40,7 @@ func getMigrations() []migration {
 		&RefineStockbitDepositSubject{},
 		&AddMandiriTradeTemplate{},
 		&RefineMandiriPageBreaks{},
+		&AddAppliedWithdrawalDelta{},
 	}
 }
 

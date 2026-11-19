@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
+import ThemeToggle from '../components/ThemeToggle'
 import { useNavigate } from 'react-router-dom'
-import { getBaseUrl } from '../lib/api'
+import { api } from '../lib/api'
+import { toast } from 'react-toastify'
 import { clearSession, isTokenExpired, syncSessionFromServer } from '../lib/session'
 
 export default function LoginPage() {
@@ -30,8 +32,17 @@ export default function LoginPage() {
       })
   }, [navigate])
 
-  const handleLogin = () => {
-    window.location.href = `${getBaseUrl()}/auth/google/login`
+  const [starting, setStarting] = useState(false)
+  const handleLogin = async () => {
+    setStarting(true)
+    try {
+      const { url, state, verifier } = await api<{ url: string; state: string; verifier: string }>('/auth/google/login', { cache: 'no-store' })
+      sessionStorage.setItem('pending-google-login', JSON.stringify({ state, verifier, expires: Date.now() + 600_000 }))
+      window.location.assign(url)
+    } catch {
+      toast.error('Login Google gagal dimulai. Silakan coba lagi.')
+      setStarting(false)
+    }
   }
 
   // Tampilkan spinner sementara mengecek token yang tersimpan.
@@ -57,7 +68,10 @@ export default function LoginPage() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-white p-4">
       <div className="w-full max-w-[440px] rounded-[24px] bg-white p-10 shadow-xl relative border border-slate-300 text-left">
-        <h2 className="mb-1 text-[22px] font-semibold text-slate-500 tracking-tight">Stock API.</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="mb-1 text-[22px] font-semibold text-slate-500 tracking-tight">Stock API.</h2>
+          <ThemeToggle />
+        </div>
         <h1 className="mb-8 text-[28px] font-bold text-slate-800 tracking-tight">
           Log in to your account
         </h1>
@@ -65,6 +79,7 @@ export default function LoginPage() {
         <div className="space-y-3">
           <button
             onClick={handleLogin}
+            disabled={starting}
             className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-300 bg-white px-4 py-3.5 text-[15px] font-semibold text-slate-700 transition-all hover:bg-slate-50 active:scale-[0.98] shadow-sm"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 48 48">

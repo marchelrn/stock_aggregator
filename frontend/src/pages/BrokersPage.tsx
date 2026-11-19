@@ -586,9 +586,9 @@ export default function BrokersPage() {
               {/* Section: Tambah Saham yang Dimiliki */}
               <div className="border-t border-slate-200 pt-3">
                 <div className="mb-2">
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+                  <p className="mb-1 text-xs font-semibold tracking-wider text-slate-700">
                     Saham yang Dimiliki (Opsional)
-                  </h4>
+                  </p>
                   <p className="text-[11px] text-slate-500">
                     Masukkan saham yang sudah ada di portofolio broker ini beserta harga beli rata-ratanya.
                   </p>

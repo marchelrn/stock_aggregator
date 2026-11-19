@@ -5,6 +5,7 @@ import DashboardPage from './pages/DashboardPage'
 import BrokersPage from './pages/BrokersPage'
 import MarketPage from './pages/MarketPage'
 import LoginPage from './pages/LoginPage'
+import ThemeToggle from './components/ThemeToggle'
 import NotFoundPage from './pages/NotFoundPage'
 import AuthCallback from './pages/AuthCallback'
 import GmailCallback from './pages/GmailCallback'
@@ -61,6 +62,7 @@ function Nav() {
           Market
         </NavLink>
         <div className="flex-1"></div>
+        <ThemeToggle />
         <button
           onClick={logout}
           className="rounded-lg px-3 py-1.5 text-sm font-semibold text-rose-600 hover:bg-rose-50 transition"

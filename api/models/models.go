@@ -61,13 +61,14 @@ const (
 )
 
 type CashMutation struct {
-	ID         int              `json:"id" gorm:"column:id;primaryKey"`
-	UserID     uint             `json:"user_id" gorm:"column:user_id;index"`
-	BrokerID   int              `json:"broker_id" gorm:"column:broker_id;index"`
-	BrokerName string           `json:"broker_name" gorm:"column:broker_name"`
-	Type       CashMutationType `json:"type" gorm:"column:type"`
-	Amount     float64          `json:"amount" gorm:"column:amount"`
-	Date       time.Time        `json:"date" gorm:"column:date"`
+	ID           int              `json:"id" gorm:"column:id;primaryKey"`
+	UserID       uint             `json:"user_id" gorm:"column:user_id;index"`
+	BrokerID     int              `json:"broker_id" gorm:"column:broker_id;index"`
+	BrokerName   string           `json:"broker_name" gorm:"column:broker_name"`
+	Type         CashMutationType `json:"type" gorm:"column:type"`
+	Amount       float64          `json:"amount" gorm:"column:amount"`
+	AppliedDelta *float64         `json:"-" gorm:"column:applied_delta"`
+	Date         time.Time        `json:"date" gorm:"column:date"`
 	// EmailReceivedAt is import metadata only; Date controls cash eligibility.
 	EmailReceivedAt *time.Time `json:"email_received_at" gorm:"column:email_received_at"`
 	Description     string     `json:"description" gorm:"column:description"`

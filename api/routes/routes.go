@@ -80,6 +80,7 @@ func SetupRoutes(s *contract.Service) *gin.Engine {
 		// Google OAuth & Auth routes
 		api.POST("/auth/register", authController.Register)
 		api.POST("/auth/login", authController.Login)
+		api.POST("/auth/google/complete", authController.CompleteGoogleLogin)
 		api.GET("/auth/google/login", authController.GoogleLogin)
 		api.GET("/auth/google/callback", authController.GoogleCallback)
 	}

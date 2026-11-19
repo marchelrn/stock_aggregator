@@ -19,8 +19,8 @@ type Service struct {
 type AuthService interface {
 	Register(payload *dto.RegisterRequest) (*dto.AuthResponse, error)
 	Login(payload *dto.LoginRequest) (*dto.AuthResponse, error)
-	GoogleLogin(code string) (*dto.AuthResponse, error)
-	GetGoogleLoginURL(state string) string
+	GoogleLogin(code, verifier string) (*dto.AuthResponse, error)
+	GetGoogleLoginURL(state, verifier string) string
 	StartGmailConnection(userID uint) (*dto.GmailConnectionStart, error)
 	CompleteGmailConnection(ctx context.Context, userID uint, request dto.GmailConnectionRequest) error
 	GetUserInformation(userID float64) (*dto.UserResponse, error)
