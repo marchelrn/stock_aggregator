@@ -15,6 +15,7 @@ import (
 	"github.com/marchelrn/stock_api/models"
 	errs "github.com/marchelrn/stock_api/pkg/error"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/oauth2"
 	"gorm.io/gorm"
 )
 
@@ -123,20 +124,23 @@ func (s *AuthService) Login(payload *dto.LoginRequest) (*dto.AuthResponse, error
 	}, nil
 }
 
-func (s *AuthService) GoogleLogin(code string) (*dto.AuthResponse, error) {
+func (s *AuthService) GoogleLogin(code, verifier string) (*dto.AuthResponse, error) {
 	cfg := config.GetConfig()
 
-	token, err := cfg.GoogleOAuthConfig.Exchange(context.Background(), code)
+	token, err := cfg.GoogleOAuthConfig.Exchange(context.Background(), code, oauth2.VerifierOption(verifier))
 	if err != nil {
 		return nil, errs.Unauthorized("Gagal menukar kode otorisasi Google")
 	}
 
-	resp, err := http.Get("https://www.googleapis.com/oauth2/v2/userinfo?access_token=" + token.AccessToken)
+	resp, err := cfg.GoogleOAuthConfig.Client(context.Background(), token).Get("https://www.googleapis.com/oauth2/v2/userinfo")
 	if err != nil {
 		return nil, errs.InternalServerError("Gagal mendapatkan informasi user Google: " + err.Error())
 	}
 
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errs.Unauthorized("Gagal memverifikasi akun Google")
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -193,9 +197,9 @@ func (s *AuthService) GoogleLogin(code string) (*dto.AuthResponse, error) {
 	}, nil
 }
 
-func (s *AuthService) GetGoogleLoginURL(state string) string {
+func (s *AuthService) GetGoogleLoginURL(state, verifier string) string {
 	cfg := config.GetConfig()
-	return cfg.GoogleOAuthConfig.AuthCodeURL(state)
+	return cfg.GoogleOAuthConfig.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier))
 }
 
 func (s *AuthService) GetUserInformation(UserID float64) (*dto.UserResponse, error) {
