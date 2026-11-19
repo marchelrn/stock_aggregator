@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import ThemeToggle from '../components/ThemeToggle'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { toast } from 'react-toastify'
@@ -67,7 +68,10 @@ export default function LoginPage() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-white p-4">
       <div className="w-full max-w-[440px] rounded-[24px] bg-white p-10 shadow-xl relative border border-slate-300 text-left">
-        <h2 className="mb-1 text-[22px] font-semibold text-slate-500 tracking-tight">Stock API.</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="mb-1 text-[22px] font-semibold text-slate-500 tracking-tight">Stock API.</h2>
+          <ThemeToggle />
+        </div>
         <h1 className="mb-8 text-[28px] font-bold text-slate-800 tracking-tight">
           Log in to your account
         </h1>

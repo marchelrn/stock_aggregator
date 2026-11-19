@@ -3,6 +3,13 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    color-scheme: light dark;
+  }
+  :root.dark {
+    --toastify-color-light: #181818;
+    --toastify-text-color-light: #ededed;
+  }
   body {
     @apply m-0 min-h-screen bg-slate-50 font-sans text-slate-800;
   }
