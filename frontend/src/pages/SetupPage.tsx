@@ -10,12 +10,7 @@ import { formatCurrency } from '../lib/formatters'
 import { api } from '../lib/api'
 import { ChevronRightIcon } from 'lucide-react'
 
-const BROKERS = [
-  { name: 'Stockbit Sekuritas', needsPin: false, disabled: false },
-  { name: 'Trimegah Sekuritas', needsPin: false, disabled: false },
-  { name: 'Mandiri Sekuritas', needsPin: true, disabled: false },
-  { name: 'BNI Sekuritas', needsPin: false, disabled: true },
-]
+import { BROKERS } from '../lib/brokerOptions'
 
 export default function SetupPage() {
   const navigate = useNavigate()

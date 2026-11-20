@@ -1,3 +1,4 @@
+import { BROKERS, findBrokerOption } from '../lib/brokerOptions'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePortfolio } from '../context/PortfolioContext'
 import { formatCurrency } from '../lib/formatters'
@@ -52,6 +53,9 @@ export default function BrokersPage() {
 
   // Broker yang sedang diatur saldo dasarnya (modal Atur Saldo Kas)
   const [cashBaseBroker, setCashBaseBroker] = useState<Broker | null>(null)
+  const configOption = findBrokerOption(configBrokerName)
+  const existingBroker = state.brokers.find((broker) => broker.name.toLowerCase() === configBrokerName.toLowerCase())
+
 
   const [configureOpen, setConfigureOpen] = useState(false)
   const [configBrokerName, setConfigBrokerName] = useState('')
@@ -178,11 +182,12 @@ export default function BrokersPage() {
       return
     }
 
-    const existingBroker = state.brokers.find(
-      (b) => b.name.toLowerCase() === configBrokerName.toLowerCase(),
-    )
+    if (configOption?.disabled || (!configOption && !existingBroker)) {
+      setStatus('Sekuritas ini belum tersedia.', true)
+      return
+    }
 
-    if (configBrokerName === 'Mandiri Sekuritas' && !existingBroker && !configPin) {
+    if (configOption?.needsPin && !existingBroker && !configPin) {
       setStatus('PIN Trade Confirmation wajib diisi untuk Mandiri Sekuritas', true)
       return
     }
@@ -516,7 +521,7 @@ export default function BrokersPage() {
                 <select
                   id="select-broker"
                   value={configBrokerName}
-                  onChange={(e) => setConfigBrokerName(e.target.value)}
+                  onChange={(e) => { setConfigBrokerName(e.target.value); setConfigPin('') }}
                   required
                   className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-teal-600 focus:outline-none"
                 >
@@ -526,18 +531,17 @@ export default function BrokersPage() {
                   {state.brokers.length > 0 && (
                     <optgroup label="Broker Anda Saat Ini">
                       {state.brokers.map((b) => (
-                        <option key={b.id} value={b.name}>
-                          {b.name} (Tersimpan)
+                        <option key={b.id} value={b.name} disabled={findBrokerOption(b.name)?.disabled}>
+                          {b.name} {findBrokerOption(b.name)?.disabled ? '(belum tersedia)' : '(Tersimpan)'}
                         </option>
                       ))}
                     </optgroup>
                   )}
                   <optgroup label="Tambah Sekuritas Baru">
-                    {['Stockbit Sekuritas', 'Trimegah Sekuritas', 'Mandiri Sekuritas', 'BNI Sekuritas']
-                      .filter((name) => !state.brokers.some((b) => b.name.toLowerCase() === name.toLowerCase()))
-                      .map((name) => (
-                        <option key={name} value={name}>
-                          {name}
+                    {BROKERS.filter((option) => !state.brokers.some((b) => findBrokerOption(b.name) === option))
+                      .map(({ name, disabled }) => (
+                        <option key={name} value={name} disabled={disabled}>
+                          {name}{disabled ? ' (belum tersedia)' : ''}
                         </option>
                       ))}
                   </optgroup>
@@ -562,8 +566,7 @@ export default function BrokersPage() {
                 />
               </div>
 
-              {configBrokerName === 'Mandiri Sekuritas' &&
-                !state.brokers.some((b) => b.name.toLowerCase() === 'mandiri sekuritas') && (
+              {configOption?.needsPin && !existingBroker && (
                   <div className="grid gap-1">
                     <label className="text-xs font-semibold text-slate-700" htmlFor="broker-pin">
                       PIN Trade Confirmation
