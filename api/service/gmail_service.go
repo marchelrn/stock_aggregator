@@ -194,6 +194,11 @@ func (s *GmailServiceImpl) convertParsedTradeToTransaction(user *models.Users, t
 
 // convertCashMutationToDTO converts a cash mutation model to DTO format
 func (s *GmailServiceImpl) convertCashMutationToDTO(m *models.CashMutation) dto.CashMutationItem {
+	date := m.Date.Format("2006-01-02")
+	if m.Date.Hour() != 0 || m.Date.Minute() != 0 || m.Date.Second() != 0 || m.Date.Nanosecond() != 0 {
+		// Timed entries use the same WITA wall clock as the transactions table.
+		date = m.Date.Format("2006-01-02T15:04:05.999999999") + "+08:00"
+	}
 	return dto.CashMutationItem{
 		ID:          int(m.ID),
 		UserID:      int(m.UserID),
@@ -201,7 +206,7 @@ func (s *GmailServiceImpl) convertCashMutationToDTO(m *models.CashMutation) dto.
 		BrokerName:  m.BrokerName,
 		Type:        string(m.Type),
 		Amount:      m.Amount,
-		Date:        m.Date.Format("2006-01-02T15:04:05Z07:00"),
+		Date:        date,
 		Description: m.Description,
 		RefNo:       m.RefNo,
 		CreatedAt:   m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),

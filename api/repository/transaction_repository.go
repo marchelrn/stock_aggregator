@@ -200,9 +200,12 @@ func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.
 	return payload, nil
 }
 
+// History dates are WITA wall times in PostgreSQL's timestamp-without-zone column.
+const transactionHistoryColumns = "id, user_id, ticker, price, lot, stock_id, broker_id, broker_name, type, date AT TIME ZONE 'Asia/Makassar' AS date, amount_done, tax, ref_no"
+
 func (r *TransactionRepository) GetTransactions(userID uint, id int) ([]models.Transaction, error) {
 	var transactions []models.Transaction
-	if err := r.db.Where("user_id = ? AND id = ?", userID, id).Find(&transactions).Error; err != nil {
+	if err := r.db.Select(transactionHistoryColumns).Where("user_id = ? AND id = ?", userID, id).Find(&transactions).Error; err != nil {
 		return nil, err
 	}
 	return transactions, nil
@@ -210,7 +213,7 @@ func (r *TransactionRepository) GetTransactions(userID uint, id int) ([]models.T
 
 func (r *TransactionRepository) GetAllTransactions(userID uint) ([]models.Transaction, error) {
 	var transactions []models.Transaction
-	if err := r.db.Where("user_id = ?", userID).Order("date DESC").Find(&transactions).Error; err != nil {
+	if err := r.db.Select(transactionHistoryColumns).Where("user_id = ?", userID).Order("date DESC").Find(&transactions).Error; err != nil {
 		return nil, err
 	}
 	return transactions, nil
