@@ -70,6 +70,7 @@ type BrokerRepository interface {
 }
 
 type TransactionRepository interface {
+	History(ctx context.Context, userID uint, page, size int, search string) (*dto.HistoryPage, error)
 	GetTransactions(userID uint, id int) ([]models.Transaction, error)
 	GetAllTransactions(userID uint) ([]models.Transaction, error)
 	CreateTransactionAndSyncHolding(payload *models.Transaction) (*models.Transaction, error)

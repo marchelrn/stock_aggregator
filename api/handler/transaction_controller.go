@@ -112,3 +112,27 @@ func (c *TransactionController) DeleteTransaction(ctx *gin.Context) {
 
 	ctx.JSON(response.StatusCode, response)
 }
+
+func (c *TransactionController) History(ctx *gin.Context) {
+	userID, err := getUserID(ctx)
+	if err != nil {
+		HandleError(ctx, err)
+		return
+	}
+	page, err := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+	if err != nil || page < 1 {
+		HandleError(ctx, errs.BadRequest("invalid page"))
+		return
+	}
+	size, err := strconv.Atoi(ctx.DefaultQuery("page_size", "5"))
+	if err != nil || size < 1 || size > 50 {
+		HandleError(ctx, errs.BadRequest("invalid page size"))
+		return
+	}
+	result, err := c.service.History(ctx.Request.Context(), userID, page, size, ctx.Query("q"))
+	if err != nil {
+		HandleError(ctx, errs.InternalServerError("failed to load history"))
+		return
+	}
+	ctx.JSON(200, result)
+}

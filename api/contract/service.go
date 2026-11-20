@@ -58,6 +58,7 @@ type BrokersService interface {
 }
 
 type TransactionService interface {
+	History(ctx context.Context, userID uint, page, size int, search string) (*dto.HistoryPage, error)
 	GetTransaction(userID uint, id int) (*dto.TransactionResponse, error)
 	GetAllTransactions(userID uint) (*dto.AllTransactionsResponse, error)
 	CreateTransaction(userID uint, ticker []string, payload *dto.TransactionRequest) (*dto.TransactionResponse, error)

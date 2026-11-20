@@ -33,7 +33,7 @@ interface PortfolioState {
   holdings: Holding[]
   stockPrices: StockPriceMap
   liveStockPrices: StockPriceMap
-  transactionHistory: Transaction[]
+  historyRevision: number
   user: User | null
 }
 
@@ -76,7 +76,7 @@ const initialState: PortfolioState = {
   holdings: [],
   stockPrices: {},
   liveStockPrices: {},
-  transactionHistory: [],
+  historyRevision: 0,
   user: null,
 }
 
@@ -102,11 +102,10 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       if (!silent) setStatus('Loading data...')
 
       try {
-        const [userInfo, brokersResult, holdingsResult, historyResult] = await Promise.allSettled([
+        const [userInfo, brokersResult, holdingsResult] = await Promise.allSettled([
           api('/api/auth/user'),
           api('/brokers'),
           api('/my/stocks'),
-          api('/transactions'),
         ])
 
         const user: User | null =
@@ -116,7 +115,6 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         if (user?.email) localStorage.setItem('userEmail', user.email)
         const brokers = brokersResult.status === 'fulfilled' ? normalizeArray<Broker>(brokersResult.value) : []
         const holdings = holdingsResult.status === 'fulfilled' ? normalizeArray<Holding>(holdingsResult.value) : []
-        const history = historyResult.status === 'fulfilled' ? normalizeArray<Transaction>(historyResult.value) : []
 
         const uniqueTickers = [
           ...new Set(holdings.map((h) => String(h.ticker || '').toUpperCase()).filter(Boolean)),
@@ -140,15 +138,14 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
           user,
           brokers,
           holdings,
-          transactionHistory: history,
+          historyRevision: prev.historyRevision + 1,
           stockPrices,
           summary,
         }))
 
         if (
           brokersResult.status === 'rejected' ||
-          holdingsResult.status === 'rejected' ||
-          historyResult.status === 'rejected'
+          holdingsResult.status === 'rejected'
         ) {
           const msg = [
             brokersResult.status === 'rejected'
@@ -156,9 +153,6 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
               : null,
             holdingsResult.status === 'rejected'
               ? `stocks: ${(holdingsResult.reason as Error)?.message || 'failed'}`
-              : null,
-            historyResult.status === 'rejected'
-              ? `transactions: ${(historyResult.reason as Error)?.message || 'failed'}`
               : null,
           ]
             .filter(Boolean)

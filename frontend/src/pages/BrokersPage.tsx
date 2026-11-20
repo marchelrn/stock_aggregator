@@ -4,7 +4,7 @@ import { usePortfolio } from '../context/PortfolioContext'
 import { formatCurrency } from '../lib/formatters'
 import { api } from '../lib/api'
 import { normalizeArray } from '../lib/portfolio'
-import type { Broker, Holding, CashMutationData } from '../types'
+import type { Broker, Holding } from '../types'
 import BrokerTable from '../components/BrokerTable'
 import HoldingTable from '../components/HoldingTable'
 import TransactionHistory from '../components/TransactionHistory'
@@ -37,10 +37,7 @@ export default function BrokersPage() {
     fetchStockPrices,
     clearLiveStockPrices,
     setStatus,
-    loadCashMutations,
   } = usePortfolio()
-
-  const [cashMutations, setCashMutations] = useState<CashMutationData[]>([])
 
   // Broker yang holding-nya ditampilkan. Boleh lebih dari satu (atau kosong).
   const [selectedBrokerIds, setSelectedBrokerIds] = useState<number[]>([])
@@ -53,12 +50,12 @@ export default function BrokersPage() {
 
   // Broker yang sedang diatur saldo dasarnya (modal Atur Saldo Kas)
   const [cashBaseBroker, setCashBaseBroker] = useState<Broker | null>(null)
-  const configOption = findBrokerOption(configBrokerName)
-  const existingBroker = state.brokers.find((broker) => broker.name.toLowerCase() === configBrokerName.toLowerCase())
-
 
   const [configureOpen, setConfigureOpen] = useState(false)
   const [configBrokerName, setConfigBrokerName] = useState('')
+  const configOption = findBrokerOption(configBrokerName)
+  const existingBroker = state.brokers.find((broker) => broker.name.toLowerCase() === configBrokerName.toLowerCase())
+
   const [configCash, setConfigCash] = useState<number | ''>('')
   const [configPin, setConfigPin] = useState('')
 
@@ -80,11 +77,6 @@ export default function BrokersPage() {
   useEffect(() => {
     loadDashboard()
   }, [loadDashboard])
-
-  // Load cash mutations on mount
-  useEffect(() => {
-    loadCashMutations().then(setCashMutations)
-  }, [loadCashMutations])
 
   // Sinkronkan pilihan dengan daftar broker:
   // - broker baru otomatis dicentang (semua tampil secara default)
@@ -317,10 +309,7 @@ export default function BrokersPage() {
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-xl font-semibold">History</h2>
           </div>
-          <TransactionHistory
-            transactionHistory={state.transactionHistory}
-            cashMutations={cashMutations}
-          />
+          <TransactionHistory revision={state.historyRevision} />
         </section>
 
         <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">

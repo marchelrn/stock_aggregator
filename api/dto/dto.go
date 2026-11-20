@@ -297,3 +297,22 @@ type CashMutationsListResponse struct {
 	Message    string             `json:"message"`
 	Data       []CashMutationItem `json:"data"`
 }
+
+type HistoryItem struct {
+	Kind       string  `json:"kind"`
+	ID         int     `json:"id"`
+	Type       string  `json:"type"`
+	BrokerName string  `json:"broker_name"`
+	Date       string  `json:"date"`
+	Ticker     string  `json:"ticker,omitempty"`
+	Lot        int     `json:"lot,omitempty"`
+	Price      float64 `json:"price,omitempty"`
+	Amount     float64 `json:"amount"`
+	Tax        float64 `json:"tax"`
+}
+
+type HistoryPage struct {
+	Data  []HistoryItem `json:"data"`
+	Page  int           `json:"page"`
+	Total int           `json:"total"`
+}

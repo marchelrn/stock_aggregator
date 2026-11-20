@@ -1,24 +1,36 @@
 import { useEffect, useState } from 'react'
 import { formatNumber, formatCurrency } from '../lib/formatters'
+import { historyDate } from '../lib/historyDate'
 import Pagination from './Pagination'
-import type { CashMutationData, Transaction } from '../types'
+import { api } from '../lib/api'
 
-interface TransactionHistoryProps {
-  transactionHistory?: Transaction[]
-  cashMutations?: CashMutationData[]
+interface HistoryItem {
+  id: number
+  kind: 'cash' | 'trade'
+  date: string
+  type: string
+  broker_name: string
+  amount: number
+  tax: number
+  ticker?: string
+  lot?: number
+  price?: number
 }
 
-const PAGE_SIZE_OPTIONS = [5, 10, 25, 50]
+interface HistoryPage {
+  data: HistoryItem[]
+  page: number
+  total: number
+}
 
-// Baris gabungan: transaksi saham dan mutasi kas (deposit, penarikan, dividen)
-// ditampilkan di satu tabel agar riwayat keuangan terbaca berurutan.
-type HistoryRow =
-  | { kind: 'trade'; time: number; trade: Transaction }
-  | { kind: 'cash'; time: number; mutation: CashMutationData }
-
-const parseTime = (value: string): number => {
-  const time = new Date(value).getTime()
-  return Number.isNaN(time) ? 0 : time
+function HistoryDate({ date }: { date: ReturnType<typeof historyDate> }) {
+  if (!date.dateTime) return <span>{date.label}</span>
+  return (
+    <time dateTime={date.dateTime}>
+      {date.label}
+      <span className="block text-xs text-slate-500">{date.clock}</span>
+    </time>
+  )
 }
 
 const mutationBadgeClass: Record<string, string> = {
@@ -27,53 +39,44 @@ const mutationBadgeClass: Record<string, string> = {
   DIVIDEND: 'text-teal-600',
 }
 
-export default function TransactionHistory({
-  transactionHistory = [],
-  cashMutations = [],
-}: TransactionHistoryProps) {
+export default function TransactionHistory({ revision }: { revision: number }) {
   const [searchTerm, setSearchTerm] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(5)
+  const [result, setResult] = useState<HistoryPage | null>(null)
+  const [error, setError] = useState(false)
 
   useEffect(() => {
-    setPage(1)
-  }, [searchTerm])
-
-  const rows: HistoryRow[] = [
-    ...transactionHistory.map((trade) => ({ kind: 'trade' as const, time: parseTime(trade.date), trade })),
-    ...cashMutations.map((mutation) => ({ kind: 'cash' as const, time: parseTime(mutation.date), mutation })),
-  ].sort((a, b) => b.time - a.time)
-
-  const filtered = rows.filter((row) => {
-    if (!searchTerm.trim()) return true
-    const term = searchTerm.toLowerCase()
-    if (row.kind === 'trade') {
-      return (
-        row.trade.stock?.ticker?.toLowerCase().includes(term) ||
-        row.trade.broker?.name?.toLowerCase().includes(term) ||
-        row.trade.type?.toLowerCase().includes(term)
-      )
+    const controller = new AbortController()
+    setResult(null)
+    setError(false)
+    const query = new URLSearchParams({ page: String(page), page_size: String(pageSize), q: searchTerm })
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await api<HistoryPage>(`/api/history?${query}`, { signal: controller.signal })
+        if (!controller.signal.aborted) {
+          setResult(response)
+          setPage(response.page)
+        }
+      } catch {
+        if (!controller.signal.aborted) setError(true)
+      }
+    }, searchTerm ? 200 : 0)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
     }
-    return (
-      row.mutation.broker_name?.toLowerCase().includes(term) ||
-      row.mutation.type?.toLowerCase().includes(term) ||
-      row.mutation.description?.toLowerCase().includes(term) ||
-      row.mutation.ref_no?.toLowerCase().includes(term)
-    )
-  })
-
-  const totalItems = filtered.length
-  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
-  const currentPage = Math.min(page, totalPages)
-  const startIndex = (currentPage - 1) * pageSize
-  const pageItems = filtered.slice(startIndex, startIndex + pageSize)
+  }, [page, pageSize, searchTerm, revision])
 
   return (
     <div>
       <form className="mt-3 flex flex-col gap-1 sm:flex-row" onSubmit={(e) => e.preventDefault()}>
         <input
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={(e) => {
+            setSearchTerm(e.target.value)
+            setPage(1)
+          }}
           type="text"
           placeholder="Cari saham, broker, atau mutasi kas"
           className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-teal-600 focus:outline-none"
@@ -100,81 +103,79 @@ export default function TransactionHistory({
                   Tax
                 </th>
                 <th className="w-[22%] border-b border-slate-300 p-1 text-center text-xs">
-                  Date
+                  Tanggal
                 </th>
               </tr>
             </thead>
             <tbody>
-              {pageItems.length === 0 ? (
+              {!result?.data.length ? (
                 <tr>
                   <td colSpan={6} className="p-1 text-sm text-center text-slate-500">
-                    Tidak ada data transaksi.
+                    {error ? 'Gagal memuat riwayat.' : result ? 'Tidak ada data transaksi.' : 'Memuat riwayat…'}
                   </td>
                 </tr>
               ) : (
-                pageItems.map((row) => {
+                result.data.map((row) => {
                   if (row.kind === 'cash') {
-                    const { mutation } = row
-                    const badgeClass = mutationBadgeClass[mutation.type] || 'bg-slate-200 text-slate-700'
+                    const badgeClass = mutationBadgeClass[row.type] || 'bg-slate-200 text-slate-700'
                     return (
-                      <tr key={`cash-${mutation.id}`}>
+                      <tr key={`cash-${row.id}`}>
                         <td className="border-b border-slate-100 p-3 text-center">
                           <div className="flex flex-col items-center gap-1">
                             <span
                               className={`px-2 py-0.5 rounded text-xs font-semibold ${badgeClass}`}
                             >
-                              {mutation.type}
+                              {row.type}
                             </span>
-                            <div className="text-xs text-slate-500">{mutation.broker_name}</div>
+                            <div className="text-xs text-slate-500">{row.broker_name}</div>
                           </div>
                         </td>
                         <td className="border-b border-slate-100 p-1 text-sm text-center">-</td>
                         <td className="border-b border-slate-100 p-1 text-sm text-center">-</td>
                         <td className="border-b border-slate-100 p-1 text-sm text-center">
-                          {formatCurrency(mutation.amount)}
+                          {formatCurrency(row.amount)}
                         </td>
                         <td className="border-b border-slate-100 p-1 text-sm text-center">-</td>
                         <td className="border-b border-slate-100 p-1 text-sm text-center">
-                          {new Date(mutation.date).toLocaleString()}
+                          <HistoryDate date={historyDate(row.date)} />
                         </td>
                       </tr>
                     )
                   }
 
-                  const { trade } = row
-                  const shares = (trade.stock.lot || 0) * 100
+                  const shares = (row.lot || 0) * 100
                   const price =
-                    trade.stock?.price ||
-                    (shares > 0 ? (trade.amount_done - (trade.tax || 0)) / shares : 0)
+                    row.price ||
+                    (shares > 0 ? (row.amount - (row.tax || 0)) / shares : 0)
                   return (
-                    <tr key={`trade-${trade.id}`}>
+                    <tr key={`trade-${row.id}`}>
                       <td className="border-b border-slate-100 p-3 text-center">
                         <div className="flex flex-col items-center gap-1">
                           <div className="flex items-center gap-1">
-                            <span className="font-semibold">{trade.stock.ticker}</span>
+                            <span className="font-semibold">{row.ticker}</span>
                             <span
-                              className={`px-2 py-0.5 rounded text-xs font-semibold  ${trade.type === 'BUY' ? 'text-emerald-600' : 'text-rose-600'}`}
+                              className={`px-2 py-0.5 rounded text-xs font-semibold  ${row.type === 'BUY' ? 'text-emerald-600' : 'text-rose-600'}`}
                             >
-                              {trade.type}
+                              {row.type}
                             </span>
                           </div>
-                          <div className="text-xs text-slate-500">{trade.broker.name}</div>
+                          <div className="text-xs text-slate-500">{row.broker_name}</div>
                         </div>
                       </td>
                       <td className="border-b border-slate-100 p-1 text-sm text-center">
-                        {formatNumber(trade.stock.lot, 0)}
+                        {formatNumber(row.lot, 0)}
                       </td>
                       <td className="border-b border-slate-100 p-1 text-sm text-center">
                         {formatCurrency(price)}
                       </td>
                       <td className="border-b border-slate-100 p-1 text-sm text-center">
-                        {formatCurrency(trade.amount_done)}
+                        {formatCurrency(row.amount)}
                       </td>
                       <td className="border-b border-slate-100 p-1 text-sm text-center">
-                        {formatCurrency(trade.tax)}
+                        {formatCurrency(row.tax)}
                       </td>
                       <td className="border-b border-slate-100 p-1 text-sm text-center">
-                        {new Date(trade.date).toLocaleString()}
+                        <HistoryDate date={historyDate(row.date)} />
                       </td>
                     </tr>
                   )
@@ -183,17 +184,16 @@ export default function TransactionHistory({
             </tbody>
           </table>
         </div>
-        <Pagination
-          totalItems={totalItems}
-          page={currentPage}
+        {result && <Pagination
+          totalItems={result.total}
+          page={result.page}
           pageSize={pageSize}
           onPageChange={setPage}
           onPageSizeChange={(size) => {
             setPageSize(size)
             setPage(1)
           }}
-          pageSizeOptions={PAGE_SIZE_OPTIONS}
-        />
+        />}
       </div>
     </div>
   )

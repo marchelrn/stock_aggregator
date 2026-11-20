@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -211,4 +212,8 @@ func (s *TransactionService) DeleteTransaction(userID uint, id int) (*dto.BasicR
 	}
 
 	return response, nil
+}
+
+func (s *TransactionService) History(ctx context.Context, userID uint, page, size int, search string) (*dto.HistoryPage, error) {
+	return s.Transaction.Transactions.History(ctx, userID, page, size, search)
 }
