@@ -107,8 +107,7 @@ export default function LoginPage() {
         <div className="mt-8 pt-6 border-t border-slate-300">
           <div className="flex items-start gap-3 text-[16px] text-slate-500 leading-relaxed">
             <small>
-              Pastikan Anda menggunakan Gmail utama yang terdaftar dan terhubung dengan akun
-              sekuritas/broker Anda.
+              Ensure that you use the primary Gmail account that is registered with and linked to your securities/brokerage account.
             </small>
           </div>
         </div>
