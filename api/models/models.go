@@ -39,15 +39,17 @@ type StockHolding struct {
 }
 
 type StockPrice struct {
-	Id            int       `json:"id"`
-	Ticker        string    `json:"ticker"`
-	Sector        string    `json:"sector" gorm:"column:sector"`
-	Price         float64   `json:"price"`
-	PreviousClose float64   `json:"previous_close"`
-	Change        float64   `json:"change"`
-	ChangePercent float64   `json:"change_percent"`
-	Currency      string    `json:"currency"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	QuotedAt      *time.Time `json:"quoted_at,omitempty"`
+	Stale         bool       `gorm:"-" json:"stale,omitempty"`
+	Id            int        `json:"id"`
+	Ticker        string     `json:"ticker"`
+	Sector        string     `json:"sector" gorm:"column:sector"`
+	Price         float64    `json:"price"`
+	PreviousClose float64    `json:"previous_close"`
+	Change        float64    `json:"change"`
+	ChangePercent float64    `json:"change_percent"`
+	Currency      string     `json:"currency"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // Cash Mutation (Deposit / Withdrawal)

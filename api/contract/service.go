@@ -68,7 +68,7 @@ type TransactionService interface {
 type YahooService interface {
 	GetMarket(ctx context.Context, ticker string) (*dto.MarketResponse, error)
 	GetPrice(ticker string) (*models.StockPrice, error)
-	GetPrices(tickers []string) (prices map[string]*models.StockPrice, failed map[string]string, err error)
+	GetPrices(tickers []string, refresh bool) (prices map[string]*models.StockPrice, failed map[string]string, err error)
 	GetAllPrices() ([]models.StockPrice, error)
 	GetSector(ticker string) (string, error)
 	GetSectors(tickers []string) (map[string]string, error)

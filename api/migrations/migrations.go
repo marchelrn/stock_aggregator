@@ -41,6 +41,7 @@ func getMigrations() []migration {
 		&AddMandiriTradeTemplate{},
 		&RefineMandiriPageBreaks{},
 		&AddAppliedWithdrawalDelta{},
+		&addQuoteTime{},
 	}
 }
 

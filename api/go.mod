@@ -7,6 +7,7 @@ require (
 	github.com/gin-gonic/gin v1.11.0 // direct
 	github.com/joho/godotenv v1.5.1 // direct
 	github.com/ulule/limiter/v3 v3.11.2 // direct
+	golang.org/x/sync v0.21.0
 	gorm.io/driver/postgres v1.6.0 // direct
 	gorm.io/gorm v1.31.1 // direct
 )
@@ -64,7 +65,6 @@ require (
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 	google.golang.org/api v0.285.0 // indirect

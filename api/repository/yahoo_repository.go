@@ -48,7 +48,7 @@ func (r *YahooRepository) GetAllPrices() ([]models.StockPrice, error) {
 }
 
 func (r *YahooRepository) SavePrice(price *models.StockPrice) error {
-	cols := []string{"price", "previous_close", "change", "change_percent", "currency", "updated_at"}
+	cols := []string{"price", "previous_close", "change", "change_percent", "currency", "updated_at", "quoted_at"}
 	if price.Sector != "" {
 		cols = append(cols, "sector")
 	}

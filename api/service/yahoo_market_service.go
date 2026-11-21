@@ -84,9 +84,12 @@ func (s *YahooService) fetchMarket(ctx context.Context, ticker string) (*dto.Mar
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
 	req.Header.Set("Accept", "application/json")
-	resp, err := s.marketClient.Do(req)
+	resp, err := s.yahooRequest(req)
 	if err != nil {
 		status := http.StatusBadGateway
+		if errors.Is(err, errYahooCooldown) {
+			status = http.StatusTooManyRequests
+		}
 		var timeout interface{ Timeout() bool }
 		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout()) {
 			status = http.StatusGatewayTimeout

@@ -28,6 +28,7 @@ type Error struct {
 
 type Meta struct {
 	Symbol             string  `json:"symbol"`
+	RegularMarketTime  int64   `json:"regularMarketTime"`
 	RegularMarketPrice float64 `json:"regularMarketPrice"`
 	PreviousClose      float64 `json:"previousClose"`
 	Currency           string  `json:"currency"`

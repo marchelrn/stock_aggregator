@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/marchelrn/stock_api/contract"
 	"github.com/marchelrn/stock_api/dto"
@@ -21,6 +24,8 @@ type YahooService struct {
 	YahooRepository contract.YahooRepository
 	marketClient    *http.Client
 	marketBaseURL   string
+	requests        yahooRequests
+	quotes          singleflight.Group
 	marketMu        sync.Mutex
 	marketCache     map[string]cachedMarket
 }
@@ -35,26 +40,55 @@ func ImplYahooService(repo contract.YahooRepository) contract.YahooService {
 }
 
 func (s *YahooService) GetPrice(ticker string) (*models.StockPrice, error) {
+	return s.getPrice(ticker, false)
+}
+
+func (s *YahooService) getPrice(ticker string, refresh bool) (*models.StockPrice, error) {
 	ticker = strings.ToUpper(strings.TrimSpace(ticker))
 	ticker = strings.TrimSuffix(ticker, ".JK")
 	if ticker == "" {
 		return nil, errs.BadRequest("ticker is required")
 	}
 
+	ttl := 5 * time.Minute
+	if refresh {
+		ttl = 30 * time.Second
+	}
+	var cached *models.StockPrice
 	if s.YahooRepository != nil {
-		if cached, err := s.YahooRepository.GetPrice(ticker); err == nil && cached != nil {
-			if cached.Price > 0 && !math.IsNaN(cached.Price) && !math.IsInf(cached.Price, 0) && time.Since(cached.UpdatedAt) < 5*time.Minute {
-				if cached.Sector == "" {
-					if sec, err := s.GetSector(ticker); err == nil && sec != "" {
-						cached.Sector = sec
-						_ = s.YahooRepository.UpdateSector(ticker, sec)
-					}
-				}
-				return cached, nil
+		p, err := s.YahooRepository.GetPrice(ticker)
+		if err == nil && p != nil && p.Price > 0 && !math.IsNaN(p.Price) && !math.IsInf(p.Price, 0) {
+			cached = p
+			if age := time.Since(p.UpdatedAt); age >= 0 && age < ttl {
+				return p, nil
 			}
 		}
 	}
+	v, err, _ := s.quotes.Do(ticker, func() (any, error) {
+		price, err := s.fetchPrice(ticker)
+		if err != nil {
+			return nil, err
+		}
+		price.Sector, _ = s.GetSector(ticker)
+		if s.YahooRepository != nil {
+			if err := s.YahooRepository.SavePrice(price); err != nil {
+				fmt.Printf("Failed to cache price for %s: %v\n", ticker, err)
+			}
+		}
+		return price, nil
+	})
+	if errors.Is(err, errYahooCooldown) && cached != nil {
+		copy := *cached
+		copy.Stale = true
+		return &copy, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return v.(*models.StockPrice), nil
+}
 
+func (s *YahooService) fetchPrice(ticker string) (*models.StockPrice, error) {
 	baseURL := s.marketBaseURL
 	if baseURL == "" {
 		baseURL = "https://query1.finance.yahoo.com"
@@ -67,16 +101,14 @@ func (s *YahooService) GetPrice(ticker string) (*models.StockPrice, error) {
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
 
-	client := s.marketClient
-	if client == nil {
-		client = http.DefaultClient
-	}
-
-	resp, err := client.Do(req)
+	resp, err := s.yahooRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch price for %s: %w", ticker, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, errYahooCooldown
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("Yahoo price request for %s returned HTTP %d", ticker, resp.StatusCode)
 	}
@@ -109,11 +141,9 @@ func (s *YahooService) GetPrice(ticker string) (*models.StockPrice, error) {
 		changePct = (change / meta.PreviousClose) * 100
 	}
 
-	sector, _ := s.GetSector(ticker)
-
 	price := &models.StockPrice{
-		Ticker:        ticker,
-		Sector:        sector,
+		Ticker: ticker,
+
 		Price:         meta.RegularMarketPrice,
 		PreviousClose: meta.PreviousClose,
 		Change:        change,
@@ -121,15 +151,11 @@ func (s *YahooService) GetPrice(ticker string) (*models.StockPrice, error) {
 		Currency:      meta.Currency,
 	}
 
-	price.UpdatedAt = time.Now()
-	// Update cache in database over memory cache
-	if s.YahooRepository != nil {
-		if err := s.YahooRepository.SavePrice(price); err != nil {
-			// Just log or ignore since we can still return the fetched price
-			fmt.Printf("Failed to cache price for %s: %v\n", ticker, err)
-		}
+	price.UpdatedAt = time.Now().UTC()
+	if meta.RegularMarketTime > 0 {
+		t := time.Unix(meta.RegularMarketTime, 0).UTC()
+		price.QuotedAt = &t
 	}
-
 	return price, nil
 }
 
@@ -146,7 +172,7 @@ func (s *YahooService) GetAllPrices() ([]models.StockPrice, error) {
 //
 // Dengan begitu pemanggil bisa membedakan hasil sebagian (partial) dari hasil penuh,
 // bukan menganggap seluruh permintaan berhasil hanya karena sebagian ticker valid.
-func (s *YahooService) GetPrices(tickers []string) (map[string]*models.StockPrice, map[string]string, error) {
+func (s *YahooService) GetPrices(tickers []string, refresh bool) (map[string]*models.StockPrice, map[string]string, error) {
 	prices := make(map[string]*models.StockPrice)
 	failed := make(map[string]string)
 
@@ -176,7 +202,7 @@ func (s *YahooService) GetPrices(tickers []string) (map[string]*models.StockPric
 		wg.Add(1)
 		go func(t string) {
 			defer wg.Done()
-			price, err := s.GetPrice(t)
+			price, err := s.getPrice(t, refresh)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -228,12 +254,7 @@ func (s *YahooService) GetSector(ticker string) (string, error) {
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
 	req.Header.Set("Accept", "application/json")
 
-	client := s.marketClient
-	if client == nil {
-		client = http.DefaultClient
-	}
-
-	resp, err := client.Do(req)
+	resp, err := s.yahooRequest(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to search sector for %s: %w", ticker, err)
 	}

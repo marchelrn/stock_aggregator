@@ -63,7 +63,7 @@ func (c *YahooPricesController) GetPrices(ctx *gin.Context) {
 
 	tickerList := strings.Split(strings.ToUpper(tickers), ",")
 
-	prices, failed, err := c.yahooService.GetPrices(tickerList)
+	prices, failed, err := c.yahooService.GetPrices(tickerList, ctx.Query("refresh") == "true")
 	if err != nil {
 		HandleError(ctx, errs.BadRequest(err.Error()))
 		return
