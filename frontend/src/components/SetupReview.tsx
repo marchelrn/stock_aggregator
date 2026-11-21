@@ -1,65 +1,80 @@
-import { useEffect, useRef, useState } from 'react'
-import { Trash2, ArrowLeft } from 'lucide-react'
-import { formatCurrency } from '../lib/formatters'
-import type { Broker, Holding } from '../types'
+import { useEffect, useRef, useState } from "react";
+import { Trash2, ArrowLeft, ArrowRight } from "lucide-react";
+import { formatCurrency } from "../lib/formatters";
+import type { Broker, Holding } from "../types";
 
 export interface ManualHolding {
-  ticker: string
-  lot: number
-  price: number
-  brokerId: number
-  brokerName: string
+  ticker: string;
+  lot: number;
+  price: number;
+  brokerId: number;
+  brokerName: string;
 }
 
 interface SetupReviewProps {
-  syncError: string
-  holdings: Holding[]
-  brokers: Broker[]
-  manualHoldings: ManualHolding[]
-  finishing: boolean
-  finishError: string
-  onFinish: () => void
-  onBack: () => void
-  onAddManual: (holding: ManualHolding) => void
-  onRemoveManual: (index: number) => void
+  syncError: string;
+  holdings: Holding[];
+  brokers: Broker[];
+  manualHoldings: ManualHolding[];
+  finishing: boolean;
+  finishError: string;
+  onFinish: () => void;
+  onBack: () => void;
+  onAddManual: (holding: ManualHolding) => void;
+  onRemoveManual: (index: number) => void;
 }
 
 export default function SetupReview({
-  holdings, brokers, manualHoldings, finishing, finishError, syncError,
-  onBack, onFinish, onAddManual, onRemoveManual,
+  holdings,
+  brokers,
+  manualHoldings,
+  finishing,
+  finishError,
+  syncError,
+  onBack,
+  onFinish,
+  onAddManual,
+  onRemoveManual,
 }: SetupReviewProps) {
-  const heading = useRef<HTMLHeadingElement>(null)
-  useEffect(() => { heading.current?.focus() }, [])
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    heading.current?.focus();
+  }, []);
 
-  const [brokerId, setBrokerId] = useState<number>(brokers[0]?.id ? Number(brokers[0].id) : 0)
-  const [ticker, setTicker] = useState('')
-  const [lot, setLot] = useState('1')
-  const [price, setPrice] = useState('')
+  const [brokerId, setBrokerId] = useState<number>(
+    brokers[0]?.id ? Number(brokers[0].id) : 0,
+  );
+  const [ticker, setTicker] = useState("");
+  const [lot, setLot] = useState("1");
+  const [price, setPrice] = useState("");
 
   useEffect(() => {
-    if (brokers.length === 0) return
-    if (brokers.some((broker) => Number(broker.id) === brokerId)) return
-    setBrokerId(Number(brokers[0].id))
-  }, [brokers, brokerId])
+    if (brokers.length === 0) return;
+    if (brokers.some((broker) => Number(broker.id) === brokerId)) return;
+    setBrokerId(Number(brokers[0].id));
+  }, [brokers, brokerId]);
 
-  const selectedBroker = brokers.find((broker) => Number(broker.id) === brokerId)
+  const selectedBroker = brokers.find(
+    (broker) => Number(broker.id) === brokerId,
+  );
 
   const submitManual = (event: React.FormEvent) => {
-    event.preventDefault()
-    const lotValue = Number(lot)
-    const priceValue = Number(price)
-    if (!selectedBroker || !ticker.trim() || lotValue <= 0 || priceValue <= 0) return
+    event.preventDefault();
+    const lotValue = Number(lot);
+    const priceValue = Number(price);
+    if (!selectedBroker || !ticker.trim() || lotValue <= 0 || priceValue <= 0)
+      return;
     onAddManual({
       ticker: ticker.trim().toUpperCase(),
       lot: lotValue,
       price: priceValue,
       brokerId: Number(selectedBroker.id),
       brokerName: selectedBroker.name,
-    })
-    setTicker('')
-    setLot('1')
-    setPrice('')
-  }
+    });
+    setTicker("");
+    setLot("1");
+    setPrice("");
+  };
 
   return (
     <section className="mx-auto grid w-full max-w-3xl gap-6 px-5 py-8 sm:px-10">
@@ -68,20 +83,35 @@ export default function SetupReview({
           type="button"
           onClick={onBack}
           disabled={finishing}
-          className="-ml-2 mb-2 inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="-ml-2 mb-2 hidden sm:inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md px-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 active:bg-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ArrowLeft size={16} aria-hidden="true" />
           Back
         </button>
-        <h1 ref={heading} tabIndex={-1} className="text-2xl font-semibold tracking-tight">Portofolio awal</h1>
-        <p className="mt-2 text-slate-600">Periksa saham dari email broker dan tambahkan posisi yang belum terbaca.</p>
+        <h1
+          ref={heading}
+          tabIndex={-1}
+          className="text-2xl font-semibold tracking-tight"
+        >
+          Portofolio awal
+        </h1>
+        <p className="mt-2 text-slate-600">
+          Periksa saham dari email broker dan tambahkan posisi yang belum
+          terbaca.
+        </p>
       </header>
-      {syncError && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-rose-800">{syncError}</p>}
+      {syncError && (
+        <p role="alert" className="rounded-lg bg-rose-50 p-3 text-rose-800">
+          {syncError}
+        </p>
+      )}
       <section>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="text-sm font-semibold text-slate-800">Hasil Parsing Email</h3>
+          <h3 className="text-sm font-semibold text-slate-800">
+            Hasil Parsing Email
+          </h3>
           <span className="text-xs tabular-nums text-slate-500">
-            {holdings.length} posisi
+            {holdings.length} Emiten dari {brokers.length} Broker
           </span>
         </div>
 
@@ -93,14 +123,18 @@ export default function SetupReview({
                 className="flex items-center justify-between gap-3 border-b border-slate-200 px-3 py-2 last:border-b-0"
               >
                 <span className="min-w-0">
-                  <span className="block text-sm font-semibold">{holding.ticker}</span>
+                  <span className="block text-sm font-semibold">
+                    {holding.ticker}
+                  </span>
                   <span className="block truncate text-xs text-slate-500">
                     {holding.broker_name}
                   </span>
                 </span>
                 <span className="shrink-0 text-right text-xs tabular-nums text-slate-600">
                   <span className="block">{holding.lot} lot</span>
-                  <span className="block">{formatCurrency(holding.avg_price)}</span>
+                  <span className="block">
+                    {formatCurrency(holding.avg_price)}
+                  </span>
                 </span>
               </li>
             ))}
@@ -114,7 +148,7 @@ export default function SetupReview({
 
       <section>
         <h3 className="text-sm font-semibold text-slate-800">
-          Tambahkan saham yang belum terbaca
+          Tambahkan Ticker secara manual
         </h3>
         <form onSubmit={submitManual} className="mt-2 grid gap-3">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -189,9 +223,12 @@ export default function SetupReview({
                 className="flex items-center justify-between gap-3 border-b border-slate-200 px-3 py-2 last:border-b-0"
               >
                 <span className="min-w-0">
-                  <span className="block text-sm font-semibold">{holding.ticker}</span>
+                  <span className="block text-sm font-semibold">
+                    {holding.ticker}
+                  </span>
                   <span className="block truncate text-xs text-slate-500">
-                    {holding.brokerName} · {holding.lot} lot · {formatCurrency(holding.price)}
+                    {holding.brokerName} · {holding.lot} lot ·{" "}
+                    {formatCurrency(holding.price)}
                   </span>
                 </span>
                 <button
@@ -209,21 +246,35 @@ export default function SetupReview({
         )}
       </section>
       {finishError && (
-        <p role="alert" className="border-t border-rose-200 bg-rose-50 px-5 py-3 text-sm text-rose-800">
+        <p
+          role="alert"
+          className="border-t border-rose-200 bg-rose-50 px-5 py-3 text-sm text-rose-800"
+        >
           {finishError}
         </p>
       )}
 
-      <div className="flex flex-col-reverse gap-2 border-t border-slate-200 px-5 py-4 sm:flex-row sm:justify-end">
-          <button
-            type="button"
-            onClick={onFinish}
-            disabled={finishing}
-            className="min-h-11 cursor-pointer rounded-lg bg-teal-700 px-4 text-sm font-semibold text-white hover:bg-teal-800 active:bg-teal-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {finishing ? 'Finishing...' : 'Finish Reviewing'}
-          </button>
+      <div className="sticky bottom-0 z-10 -mx-5 flex items-center justify-between gap-2 border-t border-slate-200 bg-white px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:static sm:mx-0 sm:justify-end sm:py-4">
+        <button
+          type="button"
+          onClick={onBack}
+          disabled={finishing}
+          className="inline-flex min-h-11 items-center gap-2 rounded-md px-2 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50 sm:hidden"
+        >
+          <ArrowLeft size={16} aria-hidden="true" />
+          Back
+        </button>
+
+        <button
+          type="button"
+          onClick={onFinish}
+          disabled={finishing}
+          className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold text-white hover:bg-teal-800 active:bg-teal-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {finishing ? "Finishing..." : "Finish Reviewing"}
+          <ArrowRight size={16} aria-hidden="true" className="sm:hidden" />
+        </button>
       </div>
     </section>
-  )
+  );
 }
