@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
 import { formatCurrency, formatNumber, formatPercent, plClass } from '../lib/formatters'
-import type { PortfolioSummary, TickerSummary } from '../types'
+import type { PortfolioSummary, StockPriceMap, TickerSummary } from '../types'
 
 interface TickerTableProps {
+  prices: StockPriceMap
   summary: PortfolioSummary | null
 }
 
@@ -35,7 +36,7 @@ const getProfitPct = (row: TickerSummary): number => {
   return (getProfitLoss(row) / invested) * 100
 }
 
-export default function TickerTable({ summary }: TickerTableProps) {
+export default function TickerTable({ summary, prices }: TickerTableProps) {
   const rows = summary?.by_ticker || []
 
   const sortedRows = useMemo(
@@ -72,34 +73,47 @@ export default function TickerTable({ summary }: TickerTableProps) {
               </td>
             </tr>
           ) : (
-            sortedRows.map((row) => (
-              <tr key={row.ticker}>
-                <td className="border-b border-slate-100 p-2 text-sm text-center font-semibold">
-                  {row.ticker}
-                </td>
-                <td className="border-b border-slate-100 p-2 text-sm text-right">
-                  {formatNumber(row.total_lot, 0)}
-                </td>
-                <td className="border-b border-slate-100 p-2 text-sm text-right">
-                  {formatCurrency(row.avg_price)}
-                </td>
-                <td className="border-b border-slate-100 p-2 text-sm text-right">
-                  {formatCurrency(getCurrentPrice(row))}
-                </td>
-                <td className="border-b border-slate-100 p-2 text-sm text-right">
-                  {formatCurrency(getMarketValue(row))}
-                </td>
-                <td className={`border-b border-slate-100 text-sm text-right ${plClass(getProfitLoss(row))}`}>
-                  {formatCurrency(getProfitLoss(row))}
-                </td>
-                <td className={`border-b border-slate-100 p-2 text-sm text-right ${plClass(getProfitPct(row))}`}>
-                  {formatPercent(getProfitPct(row))}
-                </td>
-                <td className="border-b border-slate-100 p-2 text-sm text-right">
-                  {formatPercent(getWeight(row))}
-                </td>
-              </tr>
-            ))
+            sortedRows.map((row) => {
+              const price = prices[row.ticker]
+              const timestamp = price?.quoted_at || price?.updated_at
+              return (
+                <tr key={row.ticker}>
+                  <td className="border-b border-slate-100 p-2 text-sm text-center font-semibold">
+                    {row.ticker}
+                  </td>
+                  <td className="border-b border-slate-100 p-2 text-sm text-right">
+                    {formatNumber(row.total_lot, 0)}
+                  </td>
+                  <td className="border-b border-slate-100 p-2 text-sm text-right">
+                    {formatCurrency(row.avg_price)}
+                  </td>
+                  <td className="border-b border-slate-100 p-2 text-sm text-right">
+                    {price ? formatCurrency(getCurrentPrice(row)) : '—'}
+                    {/*{timestamp && (
+                      <small className="block text-xs font-normal text-slate-500">
+                        {price.stale && 'Harga tersimpan · '}
+                        {price.quoted_at ? 'Kuotasi' : 'Diperiksa'}{' '}
+                        <time dateTime={timestamp}>{new Date(timestamp).toLocaleString('id-ID', {
+                          day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+                        })}</time>
+                      </small>
+                    )}*/}
+                  </td>
+                  <td className="border-b border-slate-100 p-2 text-sm text-right">
+                    {formatCurrency(getMarketValue(row))}
+                  </td>
+                  <td className={`border-b border-slate-100 text-sm text-right ${plClass(getProfitLoss(row))}`}>
+                    {formatCurrency(getProfitLoss(row))}
+                  </td>
+                  <td className={`border-b border-slate-100 p-2 text-sm text-right ${plClass(getProfitPct(row))}`}>
+                    {formatPercent(getProfitPct(row))}
+                  </td>
+                  <td className="border-b border-slate-100 p-2 text-sm text-right">
+                    {formatPercent(getWeight(row))}
+                  </td>
+                </tr>
+              )
+            })
           )}
         </tbody>
       </table>

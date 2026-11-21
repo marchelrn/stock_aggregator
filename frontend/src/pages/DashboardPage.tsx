@@ -44,7 +44,7 @@ export default function DashboardPage() {
           <h2 className="text-xl font-semibold">Portfolio Summary</h2>
           <button
             className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white hover:bg-teal-800"
-            onClick={() => loadDashboard()}
+            onClick={() => loadDashboard({ refreshPrices: true })}
           >
             Refresh Data
           </button>
@@ -79,7 +79,7 @@ export default function DashboardPage() {
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-xl font-semibold">Ticker Breakdown</h2>
         </div>
-        <TickerTable summary={state.summary} />
+        <TickerTable prices={state.stockPrices} summary={state.summary} />
       </section>
     </div>
   )

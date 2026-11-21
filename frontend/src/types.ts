@@ -46,6 +46,8 @@ export interface Holding {
 }
 
 export interface StockPrice {
+  quoted_at?: string
+  stale?: boolean
   ticker: string
   sector?: string | null
   price: number
