@@ -26,3 +26,4 @@ skills-lock.json
 /api/cmd/check_rlco_emails/
 /api/cmd/inspect_jago_and_statement/
 /api/cmd/investigate_cash_leak/
+deploy/
