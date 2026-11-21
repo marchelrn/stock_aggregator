@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from 'react'
 import { toast } from 'react-toastify'
-import { api, getBaseUrl } from '../lib/api'
+import { api, getBaseUrl, getIsDevelopment } from '../lib/api'
 import { buildSummary, normalizeArray } from '../lib/portfolio'
 import type {
   Broker,
@@ -98,7 +98,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
 
   const loadDashboard = useCallback(
     async (options: { silent?: boolean } = {}) => {
-      const { silent = false } = options
+      const silent = getIsDevelopment() || options.silent === true
       if (!silent) setStatus('Loading data...')
 
       try {
