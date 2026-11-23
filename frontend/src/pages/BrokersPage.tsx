@@ -10,7 +10,7 @@ import HoldingTable from '../components/HoldingTable'
 import TransactionHistory from '../components/TransactionHistory'
 import StockPrices from '../components/StockPrices'
 import CashBaseModal from '../components/CashBaseModal'
-import GmailConnection, { useGmailConnectionStatus } from '../components/GmailConnection'
+import GmailConnection, { startGmailConnection, useGmailConnectionStatus } from '../components/GmailConnection'
 
 interface TradeModalState {
   open: boolean
@@ -34,6 +34,7 @@ export default function BrokersPage() {
     addStock,
     deleteBroker,
     createTransaction,
+    syncSetupHistorical,
     fetchStockPrices,
     clearLiveStockPrices,
     setStatus,
@@ -51,6 +52,7 @@ export default function BrokersPage() {
   // Broker yang sedang diatur saldo dasarnya (modal Atur Saldo Kas)
   const [cashBaseBroker, setCashBaseBroker] = useState<Broker | null>(null)
 
+  const [savingBroker, setSavingBroker] = useState(false)
   const [configureOpen, setConfigureOpen] = useState(false)
   const [configBrokerName, setConfigBrokerName] = useState('')
   const configOption = findBrokerOption(configBrokerName)
@@ -184,55 +186,75 @@ export default function BrokersPage() {
       return
     }
 
-    let brokerId: number | null = null
-    const cashValue = Number(configCash) || 0
+    if (savingBroker) return
+    setSavingBroker(true)
+    try {
+      let brokerId: number | null = null
+      const cashValue = Number(configCash) || 0
 
-    if (!existingBroker) {
-      const ok = await addBroker(configBrokerName, cashValue, configPin)
-      if (!ok) return
-      try {
-        const res = await api('/brokers')
-        const updated = normalizeArray<Broker>(res)
-        const found = updated.find(
-          (b) => b.name.toLowerCase() === configBrokerName.toLowerCase(),
-        )
-        if (found) brokerId = Number(found.id)
-      } catch {
-        // fallback
+      if (!existingBroker) {
+        const ok = await addBroker(configBrokerName, cashValue, configPin)
+        if (!ok) return
+        try {
+          const res = await api('/brokers')
+          const updated = normalizeArray<Broker>(res)
+          const found = updated.find(
+            (b) => b.name.toLowerCase() === configBrokerName.toLowerCase(),
+          )
+          if (found) brokerId = Number(found.id)
+        } catch {
+          // fallback
+        }
+      } else {
+        brokerId = Number(existingBroker.id)
+        if (cashValue > 0) {
+          await addBrokerCash(existingBroker, cashValue)
+        }
       }
-    } else {
-      brokerId = Number(existingBroker.id)
-      if (cashValue > 0) {
-        await addBrokerCash(existingBroker, cashValue)
+
+      if (brokerId && pendingStocks.length > 0) {
+        let addedCount = 0
+        for (const s of pendingStocks) {
+          const ok = await addStock({
+            ticker: s.ticker,
+            lot: s.lot,
+            avg_price: s.avg_price,
+            broker_id: brokerId,
+            broker_name: configBrokerName,
+          })
+          if (ok) addedCount++
+        }
+        setStatus(`Berhasil mengonfigurasi ${configBrokerName} dan ${addedCount} saham!`)
+      } else if (existingBroker && cashValue > 0) {
+        setStatus(`Berhasil memperbarui cash untuk ${configBrokerName}.`)
       }
+
+      if (!existingBroker) {
+        try {
+          if (!gmail.connected) {
+            await startGmailConnection('/manage', configBrokerName)
+            return
+          }
+          const result = await syncSetupHistorical(configBrokerName)
+          if (result?.trade_error || result?.cash_error) {
+            setStatus([result.trade_error, result.cash_error].filter(Boolean).join(', '), true)
+          }
+        } catch (error) {
+          setStatus((error as Error).message, true)
+        }
+      }
+      await loadDashboard()
+      setConfigureOpen(false)
+      setConfigBrokerName('')
+      setConfigCash('')
+      setConfigPin('')
+      setPendingStocks([])
+      setStockTicker('')
+      setStockLot(1)
+      setStockAvgPrice('')
+    } finally {
+      setSavingBroker(false)
     }
-
-    if (brokerId && pendingStocks.length > 0) {
-      let addedCount = 0
-      for (const s of pendingStocks) {
-        const ok = await addStock({
-          ticker: s.ticker,
-          lot: s.lot,
-          avg_price: s.avg_price,
-          broker_id: brokerId,
-          broker_name: configBrokerName,
-        })
-        if (ok) addedCount++
-      }
-      setStatus(`Berhasil mengonfigurasi ${configBrokerName} dan ${addedCount} saham!`)
-    } else if (existingBroker && cashValue > 0) {
-      setStatus(`Berhasil memperbarui cash untuk ${configBrokerName}.`)
-    }
-
-    await loadDashboard()
-    setConfigureOpen(false)
-    setConfigBrokerName('')
-    setConfigCash('')
-    setConfigPin('')
-    setPendingStocks([])
-    setStockTicker('')
-    setStockLot(1)
-    setStockAvgPrice('')
   }
 
   const closeTradeModal = () => {
@@ -684,9 +706,10 @@ export default function BrokersPage() {
                 </button>
                 <button
                   type="submit"
+                  disabled={savingBroker}
                   className="rounded-lg bg-teal-700 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-800 transition"
                 >
-                  Simpan Konfigurasi
+                  {savingBroker ? 'Menyimpan…' : 'Simpan Konfigurasi'}
                 </button>
               </div>
             </form>

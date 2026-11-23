@@ -78,7 +78,7 @@ export default function SetupPage() {
     async (name: string) => {
       setSyncing(true);
       try {
-        const result = await syncSetupHistorical();
+        const result = await syncSetupHistorical(name);
         await loadDashboard({ silent: true });
         if (!result)
           throw new Error(

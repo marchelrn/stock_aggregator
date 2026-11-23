@@ -2,10 +2,12 @@ import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { GMAIL_CONNECTION_SESSION } from '../components/GmailConnection'
+import { usePortfolio } from '../context/PortfolioContext'
 import { api, ApiError } from '../lib/api'
 
 export default function GmailCallback() {
   const navigate = useNavigate()
+  const { syncSetupHistorical } = usePortfolio()
   const handled = useRef(false)
 
   useEffect(() => {
@@ -27,7 +29,7 @@ export default function GmailCallback() {
         if (!state || saved?.state !== state || typeof saved.verifier !== 'string') {
           throw new Error('Sesi koneksi Gmail tidak ditemukan. Coba hubungkan kembali.')
         }
-        if (returnTo === '/setup' && typeof saved.brokerName === 'string') brokerName = saved.brokerName
+        if (typeof saved.brokerName === 'string') brokerName = saved.brokerName
         const code = params.get('code')
         if (!code) throw new Error('Izin baca Gmail belum diberikan. Anda dapat mencoba lagi.')
         await api('/api/gmail/connect/complete', {
@@ -35,7 +37,12 @@ export default function GmailCallback() {
           body: JSON.stringify({ code, state, verifier: saved.verifier }),
         })
         toast.success('Gmail terhubung.')
-        syncAfterConsent = Boolean(brokerName)
+        if (returnTo === '/manage' && brokerName) {
+          const result = await syncSetupHistorical(brokerName)
+          if (result?.trade_error || result?.cash_error) toast.error([result.trade_error, result.cash_error].filter(Boolean).join(', '))
+        } else {
+          syncAfterConsent = Boolean(brokerName)
+        }
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) return
         toast.error(err instanceof Error ? err.message : 'Gmail belum berhasil terhubung.')
@@ -43,7 +50,7 @@ export default function GmailCallback() {
       navigate(returnTo, { replace: true, state: brokerName ? { brokerName, syncAfterConsent } : null })
     }
     void complete()
-  }, [navigate])
+  }, [navigate, syncSetupHistorical])
 
   return <p role="status" className="p-4 text-center text-slate-700">Memeriksa izin baca Gmail…</p>
 }

@@ -224,6 +224,17 @@ func (c *compiledMetadata) parseableTrade() bool {
 		!c.discoveryOnly
 }
 
+type brokerScopeKey struct{}
+
+func WithBrokerScope(ctx context.Context, names map[string]int) context.Context {
+	return context.WithValue(ctx, brokerScopeKey{}, names)
+}
+
+func BrokerScope(ctx context.Context) map[string]int {
+	names, _ := ctx.Value(brokerScopeKey{}).(map[string]int)
+	return names
+}
+
 func (p *MetadataParser) load(ctx context.Context) ([]compiledMetadata, error) {
 	if p == nil || p.store == nil {
 		return nil, errors.New("PDF template store is nil")
@@ -235,7 +246,7 @@ func (p *MetadataParser) load(ctx context.Context) ([]compiledMetadata, error) {
 	var result []compiledMetadata
 	seen := make(map[string]map[int]bool)
 	for _, template := range templates {
-		if !template.Active {
+		if !template.Active || (BrokerScope(ctx) != nil && BrokerScope(ctx)[strings.ToLower(strings.TrimSpace(template.BrokerName))] == 0) {
 			continue
 		}
 		c, err := compileMetadata(template)

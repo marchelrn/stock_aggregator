@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/marchelrn/stock_api/contract"
@@ -38,7 +39,7 @@ func (c *GmailController) SyncTradeConfirmations(ctx *gin.Context) {
 	var err error
 
 	if fullSync {
-		response, err = c.service.Gmail.SyncTradeConfirmationsFullContext(ctx, uint(uid))
+		response, err = c.service.Gmail.SyncTradeConfirmationsFullContext(ctx.Request.Context(), uint(uid), "")
 	} else {
 		response, err = c.service.Gmail.SyncTradeConfirmations(uint(uid))
 	}
@@ -68,15 +69,22 @@ func (c *GmailController) SyncSetupHistorical(ctx *gin.Context) {
 		return
 	}
 
+	var request struct {
+		BrokerName string `json:"broker_name"`
+	}
+	if ctx.ShouldBindJSON(&request) != nil || strings.TrimSpace(request.BrokerName) == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Pilih broker yang ingin disinkronkan."})
+		return
+	}
 	response := gin.H{}
-	tradeResponse, tradeErr := c.service.Gmail.SyncTradeConfirmationsFullContext(ctx, uint(uid))
+	tradeResponse, tradeErr := c.service.Gmail.SyncTradeConfirmationsFullContext(ctx.Request.Context(), uint(uid), strings.TrimSpace(request.BrokerName))
 	if tradeErr != nil {
 		response["trade_error"] = tradeErr.Error()
 	} else {
 		response["trade_sync"] = tradeResponse
 	}
 
-	cashResponse, cashErr := c.service.Gmail.SyncCashMutationsContext(ctx, uint(uid))
+	cashResponse, cashErr := c.service.Gmail.SyncCashMutationsContext(ctx.Request.Context(), uint(uid), strings.TrimSpace(request.BrokerName))
 	if cashErr != nil {
 		response["cash_error"] = cashErr.Error()
 	} else {

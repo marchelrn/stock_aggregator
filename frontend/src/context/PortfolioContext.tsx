@@ -65,7 +65,7 @@ interface PortfolioContextValue {
     fullSync?: boolean,
   ) => Promise<GmailSyncResponse | null>;
   syncCashMutations: () => Promise<CashMutationsResponse | null>;
-  syncSetupHistorical: () => Promise<SetupSyncResponse | null>;
+  syncSetupHistorical: (brokerName: string) => Promise<SetupSyncResponse | null>;
   loadCashMutations: () => Promise<CashMutationData[]>;
   getGmailSyncStatus: () => Promise<GmailSyncStatusResponse | null>;
   getCashBreakdown: (brokerId: number) => Promise<CashBreakdown | null>;
@@ -468,9 +468,10 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   // Sync historis sekali jalan setelah broker disimpan pada setup awal.
   // Endpoint mengembalikan hasil transaksi dan mutasi kas secara terpisah.
   const syncSetupHistorical =
-    useCallback(async (): Promise<SetupSyncResponse | null> => {
+    useCallback(async (brokerName: string): Promise<SetupSyncResponse | null> => {
       try {
         const res = await api<SetupSyncResponse>("/api/gmail/setup-sync", {
+          body: JSON.stringify({ broker_name: brokerName }),
           method: "POST",
         });
         return res;
