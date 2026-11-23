@@ -33,6 +33,7 @@ func getMigrations() []migration {
 		getCreateProcessedGmailMessagesTable(),
 		getDisableLegacyTrimegahDiscoveryTemplate(),
 		getUpgradePDFTemplatesV2(),
+		&addTransactionTax{},
 		getAnchorCashToRegistration(),
 		getAddMetadataCashTemplates(),
 		&RefineMetadataCashSubjects{},
