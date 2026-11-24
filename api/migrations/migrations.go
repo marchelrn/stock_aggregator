@@ -49,6 +49,7 @@ func getMigrations() []migration {
 		&stockbitTableHeaders{},
 		&stockbitFeeColumns{},
 		&tradeReviews{},
+		&ajaibAndRights{},
 	}
 }
 

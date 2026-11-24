@@ -18,6 +18,8 @@ import (
 // MetadataTrade contains broker-independent policies for rows, references and
 // fee allocation. Labels, capture groups and rates belong to the DB template.
 type MetadataTrade struct {
+	ColumnHeader     string                       `json:"column_header,omitempty"`
+	ColumnSubtotal   string                       `json:"column_subtotal,omitempty"`
 	IgnorePatterns   []string                     `json:"ignore_patterns,omitempty"`
 	PasswordSource   string                       `json:"password_source,omitempty"`
 	Extraction       string                       `json:"extraction"`
@@ -203,6 +205,28 @@ func (c *compiledMetadata) parseGenericTrades(content string, meta *EmailMetadat
 		return nil, errors.New("trade table end missing")
 	}
 	table := rest[:end[0]]
+	if policy.ColumnHeader != "" {
+		header := content[starts[0][0]:starts[0][1]]
+		split := strings.LastIndex(header, policy.ColumnHeader)
+		if split <= 0 || strings.Index(header, policy.ColumnHeader) == split {
+			return nil, errors.New("missing second trade column")
+		}
+		subtotal, err := compilePattern(policy.ColumnSubtotal)
+		if err != nil {
+			return nil, err
+		}
+		var normalized strings.Builder
+		for _, line := range strings.Split(table, "\n") {
+			cut := min(split, len(line))
+			for i, part := range []string{line[:cut], line[cut:]} {
+				part = strings.TrimSpace(part)
+				if part != "" && !subtotal.MatchString(part) {
+					normalized.WriteString([]string{"BUY ", "SELL "}[i] + part + "\n")
+				}
+			}
+		}
+		table = normalized.String()
+	}
 	rows := c.row.FindAllStringSubmatchIndex(table, -1)
 	if len(rows) == 0 {
 		return nil, errors.New("empty trade table")
@@ -333,6 +357,9 @@ func (c *compiledMetadata) parseGenericTrades(content string, meta *EmailMetadat
 		tax := gross * rate
 		if fees[side] > 0 {
 			tax = fees[side] * (gross / totals[side])
+		}
+		if policy.FeeAllocation == "side" && fees["ALL"] > 0 {
+			tax += fees["ALL"] * gross / totals["ALL"]
 		}
 		trade.Tax = math.Round(tax*100) / 100
 		if math.IsNaN(trade.Tax) || math.IsInf(trade.Tax, 0) {

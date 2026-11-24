@@ -581,6 +581,16 @@ func (s *GmailServiceImpl) syncBrokerCash(ctx context.Context, gmailSrv *gmail.S
 			return nil, err
 		}
 		scope := parser.WithBrokerScope(ctx, map[string]int{strings.ToLower(strings.TrimSpace(broker.Name)): broker.ID})
+		if provider, ok := s.TradeParser.(emailKindSelectorProvider); ok {
+			selectors, loadErr := provider.EmailSelectorsForKinds(scope, parser.KindCash, parser.KindDividend)
+			if loadErr != nil {
+				failures = append(failures, fmt.Errorf("%s: %w", broker.Name, loadErr))
+				continue
+			}
+			if len(selectors) == 0 {
+				continue
+			}
+		}
 		since := broker.LastCashSyncAt
 		if selected != "" {
 			since = nil
@@ -1227,7 +1237,9 @@ func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailS
 			default:
 				if !emailDate.IsZero() {
 					for i := range parsed {
-						parsed[i].Date = emailDate
+						if parsed[i].BrokerName != "Ajaib Sekuritas" || parsed[i].Date.IsZero() {
+							parsed[i].Date = emailDate
+						}
 					}
 				}
 				if previous != nil {

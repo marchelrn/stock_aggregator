@@ -1,0 +1,68 @@
+{
+  "key": "ajaib",
+  "broker_name": "Ajaib Sekuritas",
+  "version": 1,
+  "email_sender": "noreply@ajaib.co.id",
+  "subject_contains": "Rangkuman Transaksi Harian",
+  "filename_suffix": ".pdf",
+  "config": {
+    "schema_version": 2,
+    "document": "pdf",
+    "kind": "trade",
+    "parse_mode": "metadata",
+    "subject_pattern": "(?i)^Rangkuman Transaksi Harian\\b",
+    "required_markers": [
+      "Ajaib Sekuritas",
+      "Rangkuman Transaksi Saham Harian"
+    ],
+    "date": {
+      "pattern": "Tgl\\. Transaksi\\s*:\\s*(\\d{1,2} [A-Za-z]+ \\d{4})",
+      "group": 1,
+      "layout": "2 January 2006"
+    },
+    "numbers": {
+      "decimal_separator": ".",
+      "thousands_separator": ",",
+      "grouping_size": 3
+    },
+    "shares_per_lot": 100,
+    "table": {
+      "start_pattern": "(?m)^[ \\t]*Tipe\\s+Efek\\s+Harga\\s+Jumlah\\s+Total Beli[ \\t]+Tipe\\s+Efek\\s+Harga\\s+Jumlah\\s+Total Jual[ \\t]*\\r?\\n",
+      "end_pattern": "(?m)^[ \\t]*Total Transaksi",
+      "row_pattern": "(?m)^(BUY|SELL)\\s+[A-Z]{2}\\s+([A-Z0-9]{4}(?:-[A-Z0-9]+)?)\\s+([\\d,.]+)\\s+([\\d,.]+)\\s+([\\d,.]+)[ \\t]*(?:\\n|$)",
+      "fields": {
+        "side": 1,
+        "ticker": 2,
+        "price": 3,
+        "quantity": 4,
+        "amount": 5
+      }
+    },
+    "trade": {
+      "extraction": "layout",
+      "column_header": "Tipe",
+      "column_subtotal": "^Total (Beli|Jual)\\s*:\\s*[\\d,.]+$",
+      "side_values": {
+        "BUY": "BUY",
+        "SELL": "SELL"
+      },
+      "fee_allocation": "side",
+      "sell_amount": "subtract",
+      "ref_template": "AJAIB-{date}-{ticker}-{sequence}",
+      "fees": [
+        {
+          "pattern": "(?m)^\\s*Komisi Broker Levy, PPN[ \\t]*:[ \\t]*\\(?([\\d,.]+)\\)?[ \\t]*$",
+          "total_group": 1
+        },
+        {
+          "pattern": "(?m)^\\s*Bea Materai[ \\t]*:[ \\t]*\\(?([\\d,.]+)\\)?[ \\t]*$",
+          "total_group": 1
+        },
+        {
+          "pattern": "(?m)^\\s*PPH[ \\t]*:[ \\t]*\\(?([\\d,.]+)\\)?[ \\t]*$",
+          "sell_group": 1
+        }
+      ]
+    }
+  }
+}
