@@ -27,6 +27,7 @@ import (
 )
 
 type GmailServiceImpl struct {
+	Rights           contract.RightExerciseRepository
 	Reviews          contract.TradeReviewRepository
 	AuthRepository   contract.AuthRepository
 	TradeParser      TradeConfirmationParser
@@ -1004,6 +1005,11 @@ func (s *GmailServiceImpl) tradeConfirmationQuery(ctx context.Context, lastSyncA
 	}
 
 	if parser.BrokerScope(ctx) != nil {
+		if s.Rights != nil && parser.BrokerScope(ctx)["stockbit sekuritas"] > 0 {
+			for _, subject := range []string{"Statement of Account", "Portfolio Statement", "Laporan Bulanan", "Monthly Statement", "SOA"} {
+				selectors = append(selectors, parser.EmailMetadata{FromDomain: "stockbit.com", Subject: subject})
+			}
+		}
 		terms, err := selectorQuery(selectors, lastSyncAt)
 		if err != nil {
 			return "", err
@@ -1153,6 +1159,14 @@ func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailS
 				return err
 			}
 			meta.Filename = part.Filename
+			if soaFilename.MatchString(part.Filename) {
+				if err := s.recordStockbitSOA(ctx, uid, meta.From, part.Filename, msg.Id, pdfBytes); err != nil {
+					pending = append(pending, dto.PendingTradePDF{Filename: part.Filename, Reason: err.Error()})
+				} else {
+					*reviewed++
+				}
+				return nil
+			}
 			digest := fmt.Sprintf("%x", sha256.Sum256(pdfBytes))
 			match, canReview := s.TradeParser.(interface {
 				ReviewBroker(context.Context, parser.EmailMetadata) (string, error)
