@@ -18,7 +18,12 @@ type TradeReviewRepository interface {
 	Save(context.Context, uint, uint, string, []*models.Transaction) (int, error)
 }
 
+type RightExerciseRepository interface {
+	Record(context.Context, []models.RightExercise) error
+}
+
 type Repository struct {
+	Rights        RightExerciseRepository
 	Reviews       TradeReviewRepository
 	Stocks        StocksRepository
 	Brokers       BrokerRepository

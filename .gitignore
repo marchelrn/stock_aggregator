@@ -13,12 +13,15 @@ node_modules
 /BUG_FIX_SUMMARY.md
 /OPTIMIZATION_REPORT.md
 /RINGKASAN*.md
-/checkpoint/
+/checkpoint/*
+!/checkpoint/stockbit-rights.md
 skills-lock.json
 .agents/
 
 # Tests and investigation tools are maintained on the testing branch
 *_test.go
+!api/service/parser/ajaib_test.go
+!api/service/stockbit_rights_test.go
 !api/service/gmail_scheduler_test.go
 !api/service/gmail_cash_history_test.go
 !api/service/gmail_trade_retry_test.go
