@@ -83,3 +83,12 @@ tailscale serve 43080
 Peserta membuka **https://DOMAIN-UJI/backend/health** sekali untuk memeriksa akses, lalu **https://DOMAIN-UJI/login** di Safari atau Chrome. Pada ngrok gratis, browser dapat menampilkan halaman konfirmasi sebelum masuk. Lanjutkan login dan izin Gmail di tab yang sama. Jangan beralih dari domain uji ke IP laptop di tengah alur login. Lanjutkan dengan skenario peserta di [panduan utama](README.md).
 
 Setelah sesi, logout di HP, hentikan ngrok atau Tailscale Serve dengan Ctrl+C, lalu hentikan Nginx, frontend, dan backend. Ikuti langkah pencabutan akses Gmail di panduan utama jika peserta ingin menghentikan sinkronisasi.
+
+## Uji pemulihan PDF dengan Gemini
+
+1. Fasilitator membuat API key Gemini pada proyek Google Cloud dengan billing aktif. Pilih model yang mendukung PDF dan structured output di proyek tersebut. Kuota berbayar diperlukan untuk dokumen peserta. [Model Gemini](https://ai.google.dev/gemini-api/docs/models) · [Ketentuan pemrosesan data](https://ai.google.dev/gemini-api/terms)
+2. Isi `GEMINI_API_KEY` dan `GEMINI_MODEL` di `api/.env`. Pastikan `ENCRYPTION_KEY` backend sudah diatur dengan panjang 32 byte. Pertahankan kunci enkripsi yang dipakai saat menghubungkan Gmail agar token lama tetap bisa dibuka. Simpan API key hanya di backend.
+3. Jalankan ulang backend dan periksa migrasi `gmail_trade_reviews`. Build ulang frontend dan mulai kembali Nginx mengikuti langkah laptop di atas. Gunakan `--inspect=false` jika memakai ngrok.
+4. Untuk kegagalan yang terjadi sebelum pembaruan, jalankan sinkronisasi historis broker itu sekali dari Setup. Setelah ada TC gagal yang cocok dengan template, pemilik dapat membuka **PDF perlu ditinjau** di Setup atau Broker, termasuk setelah memuat ulang halaman.
+5. Pilih **Tinjau PDF**. Secara bawaan pemilik memilih gambar yang sudah dipotong agar hanya tabel, tanggal, biaya, dan total yang terlihat. Opsi **Seluruh PDF dari Gmail** mengirim lampiran lengkap, termasuk identitas yang tercetak. Untuk PDF berpassword, gunakan gambar tabel dari PDF yang sudah dibuka di perangkat. Pemilik menyetujui sumber yang dipilih lalu menekan **Coba baca dengan Gemini**.
+6. Cocokkan hasil dengan dokumen asli. Sebelum menyimpan, ubah satu nilai bruto dan pastikan backend menolak selisih. Koreksi nilainya, periksa semua baris, centang konfirmasi dan tekan **Simpan transaksi**. Periksa riwayat. Sinkronisasi ulang seharusnya mempertahankan jumlah transaksi.
