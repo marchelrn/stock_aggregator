@@ -63,11 +63,16 @@ func (d *BrokerDispatcherParser) selectTemplate(ctx context.Context, meta EmailM
 		return nil, err
 	}
 	var matches []compiledMetadata
+	excluded := false
 	for _, template := range templates {
 		if template.kind != KindTrade || template.document != DocumentPDF || template.discoveryOnly {
 			continue
 		}
-		if !template.matchesEmail(meta) {
+		if !template.matchesEmailSelectors(meta) {
+			continue
+		}
+		if template.excludesFilename(meta.Filename) {
+			excluded = true
 			continue
 		}
 		matches = append(matches, template)
@@ -80,6 +85,9 @@ func (d *BrokerDispatcherParser) selectTemplate(ctx context.Context, meta EmailM
 		return nil, fmt.Errorf("ambiguous email: multiple active templates match (%s)", strings.Join(keys, ", "))
 	}
 	if len(matches) == 0 {
+		if excluded {
+			return nil, ErrEmailNotApplicable
+		}
 		return nil, nil
 	}
 	return &matches[0], nil
@@ -199,11 +207,7 @@ func (d *BrokerDispatcherParser) ParseEmail(ctx context.Context, data []byte, me
 			return d.parseLegacyEmail(ctx, data, meta)
 		}
 
-		content, err := template.extractPDF(ctx, data)
-		var trades []dto.ParsedTrade
-		if err == nil {
-			trades, err = parseMetadataContent(ctx, []compiledMetadata{*template}, content, &meta)
-		}
+		trades, err := parseTradePDF(ctx, data, []compiledMetadata{*template}, &meta)
 		if err == nil {
 			if d.compare {
 				legacy, legacyErr := d.parseLegacyEmail(ctx, data, meta)
@@ -220,14 +224,22 @@ func (d *BrokerDispatcherParser) ParseEmail(ctx context.Context, data []byte, me
 			return nil, err
 		}
 		log.Printf("Template %q metadata parsing failed (%v), using fallback", template.template.Key, err)
-		return d.parseLegacyEmail(ctx, data, meta)
+		trades, fallbackErr := d.parseLegacyEmail(ctx, data, meta)
+		if errors.Is(fallbackErr, ErrNoStockbitTradeRows) {
+			return nil, fmt.Errorf("%w (template %s v%d: %v)", fallbackErr, template.template.Key, template.template.Version, err)
+		}
+		return trades, fallbackErr
 	}
 
 	if !d.fallback {
 		return nil, ErrEmailNotApplicable
 	}
 	log.Printf("No PDF template matched email; using legacy fallback")
-	return d.parseLegacyEmail(ctx, data, meta)
+	trades, err := d.parseLegacyEmail(ctx, data, meta)
+	if errors.Is(err, ErrNoStockbitTradeRows) {
+		return nil, fmt.Errorf("%w (pengirim, subjek, atau nama lampiran tidak cocok dengan template aktif)", err)
+	}
+	return trades, err
 }
 
 // parseLegacyEmail is the pre-template routing chain, kept for mailboxes and
@@ -307,4 +319,28 @@ func (d *BrokerDispatcherParser) EmailSelectorsForKinds(ctx context.Context, kin
 		return nil, nil
 	}
 	return d.metadata.EmailSelectorsForKinds(ctx, kinds...)
+}
+
+// ReviewBroker requires positive trade-document evidence in addition to the active
+// broker selectors. Some senders also deliver account statements from the same mailbox.
+func (d *BrokerDispatcherParser) ReviewBroker(ctx context.Context, meta EmailMetadata) (string, error) {
+	name := strings.ToLower(meta.Filename)
+	if strings.Contains(name, "_tcbond_") {
+		return "", nil
+	}
+	t, err := d.selectTemplate(ctx, meta)
+	if errors.Is(err, ErrEmailNotApplicable) {
+		return "", nil
+	}
+	if err != nil || t == nil {
+		return "", err
+	}
+	if t.template.EmailSender == "" && t.config.SenderDomain == "" {
+		return "", nil
+	}
+	if t.template.SubjectContains == "" && t.subject == nil && t.filename == nil &&
+		!strings.Contains(strings.ToLower(meta.Subject), "trade confirmation") && !strings.HasPrefix(name, "tc_") && !strings.HasPrefix(name, "tc-") {
+		return "", nil
+	}
+	return t.template.BrokerName, nil
 }

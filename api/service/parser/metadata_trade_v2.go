@@ -55,8 +55,8 @@ type MetadataFee struct {
 	TotalGroup int    `json:"total_group,omitempty"`
 }
 
-func (c *compiledMetadata) extractPDF(ctx context.Context, data []byte) (string, error) {
-	if c.config.Trade == nil || c.config.Trade.Extraction != "layout" {
+func (c *compiledMetadata) extractPDF(ctx context.Context, data []byte, mode string) (string, error) {
+	if mode != "layout" {
 		return extractMetadataPDF(ctx, data)
 	}
 	args := []string{"-layout"}
@@ -95,8 +95,8 @@ func (c *compiledMetadata) compileGenericTrade() (compiledMetadata, error) {
 	if t.PasswordSource != "" && t.Extraction != "layout" {
 		return *c, errors.New("PDF password requires layout extraction")
 	}
-	if cfg.SchemaVersion != 2 || (t.Extraction != "layout" && t.Extraction != "plain") {
-		return *c, errors.New("generic trade requires schema_version 2 and extraction layout or plain")
+	if cfg.SchemaVersion != 2 || (t.Extraction != "layout" && t.Extraction != "plain" && t.Extraction != "plain_then_layout") {
+		return *c, errors.New("generic trade requires schema_version 2 and a supported extraction mode")
 	}
 	for _, field := range []string{"ticker", "quantity", "price"} {
 		if cfg.Table.Fields[field] < 1 {

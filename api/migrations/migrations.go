@@ -43,6 +43,12 @@ func getMigrations() []migration {
 		&RefineMandiriPageBreaks{},
 		&AddAppliedWithdrawalDelta{},
 		&addQuoteTime{},
+		&excludeTrimegahStatements{},
+		&addCashSyncCheckpoint{},
+		&stockbitTableLayout{},
+		&stockbitTableHeaders{},
+		&stockbitFeeColumns{},
+		&tradeReviews{},
 	}
 }
 

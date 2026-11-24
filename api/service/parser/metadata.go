@@ -622,39 +622,79 @@ func (p *MetadataParser) parse(ctx context.Context, data []byte, meta *EmailMeta
 		}
 		templates = eligible
 	}
+	return parseTradePDF(ctx, data, templates, meta)
+}
+
+func parseTradePDF(ctx context.Context, data []byte, templates []compiledMetadata, meta *EmailMetadata) ([]dto.ParsedTrade, error) {
+	type extractKey struct{ mode, passwordBroker string }
+	contents := make(map[extractKey]string)
+	var trades []dto.ParsedTrade
+	var parseErr error
+	var diagnostics []string
 	var selected *compiledMetadata
-	var selectedContent string
-	contents := map[string]string{}
 	for i := range templates {
 		c := &templates[i]
-		strategy := "plain"
-		if c.config.Trade != nil {
-			strategy = c.config.Trade.Extraction
+		modes := []string{"plain"}
+		passwordBroker := ""
+		if t := c.config.Trade; t != nil {
+			if t.Extraction == "plain_then_layout" {
+				modes = []string{"plain", "layout"}
+			} else {
+				modes = []string{t.Extraction}
+			}
+			if t.PasswordSource != "" {
+				passwordBroker = c.template.BrokerName
+			}
 		}
-		content, ok := contents[strategy]
-		if !ok {
-			content, err = c.extractPDF(ctx, data)
-			if err != nil {
+		for n, mode := range modes {
+			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			contents[strategy] = content
+			key := extractKey{mode, passwordBroker}
+			content, ok := contents[key]
+			if !ok {
+				var err error
+				content, err = c.extractPDF(ctx, data, mode)
+				if err != nil {
+					if n+1 < len(modes) {
+						continue
+					}
+					return nil, err
+				}
+				contents[key] = content
+			}
+			if missing := c.firstMissingMarker(content); missing != 0 {
+				if len(templates) == 1 {
+					diagnostics = append(diagnostics, fmt.Sprintf("%s %d byte, penanda %d/%d belum terbaca", mode, len(content), missing, len(c.markers)))
+				}
+				continue
+			}
+			if selected != nil && selected != c {
+				return nil, errors.New("ambiguous PDF: multiple active templates match")
+			}
+			selected = c
+			trades, parseErr = parseMetadataContent(ctx, templates[i:i+1], content, meta)
+			if parseErr == nil {
+				break
+			}
 		}
-		matches := true
-		for _, marker := range c.markers {
-			matches = matches && marker.MatchString(content)
-		}
-		if !matches {
-			continue
-		}
-		if selected != nil {
-			return nil, errors.New("ambiguous PDF: multiple active templates match")
-		}
-		selected, selectedContent = c, content
 	}
 	if selected == nil {
+		if len(diagnostics) > 0 {
+			return nil, fmt.Errorf("unmatched PDF: no active template matches (%s)", strings.Join(diagnostics, ", "))
+		}
 		return nil, errors.New("unmatched PDF: no active template matches")
 	}
-	return parseMetadataContent(ctx, []compiledMetadata{*selected}, selectedContent, meta)
+	return trades, parseErr
+}
+
+func (c *compiledMetadata) firstMissingMarker(content string) int {
+	for i, marker := range c.markers {
+		if !marker.MatchString(content) {
+			return i + 1
+		}
+	}
+	return 0
 }
 
 func extractMetadataPDF(ctx context.Context, data []byte) (content string, err error) {
@@ -707,11 +747,7 @@ func parseMetadataContent(ctx context.Context, templates []compiledMetadata, con
 			return nil, err
 		}
 		c := &templates[i]
-		matches := meta == nil || c.matchesEmail(*meta)
-		for _, marker := range c.markers {
-			matches = matches && marker.MatchString(content)
-		}
-		if !matches {
+		if (meta != nil && !c.matchesEmail(*meta)) || c.firstMissingMarker(content) != 0 {
 			continue
 		}
 		if selected != nil {
@@ -736,11 +772,16 @@ func parseMetadataContent(ctx context.Context, templates []compiledMetadata, con
 }
 
 func (c *compiledMetadata) matchesEmail(meta EmailMetadata) bool {
+	return c.matchesEmailSelectors(meta) && !c.excludesFilename(meta.Filename)
+}
+
+func (c *compiledMetadata) excludesFilename(name string) bool {
+	return c.excludeFilename != nil && c.excludeFilename.MatchString(name)
+}
+
+func (c *compiledMetadata) matchesEmailSelectors(meta EmailMetadata) bool {
 	t := c.template
 	if c.filename != nil && !c.filename.MatchString(meta.Filename) {
-		return false
-	}
-	if c.excludeFilename != nil && c.excludeFilename.MatchString(meta.Filename) {
 		return false
 	}
 	if c.config.SenderDomain != "" {

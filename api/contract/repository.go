@@ -8,7 +8,18 @@ import (
 	"github.com/marchelrn/stock_api/models"
 )
 
+type TradeReviewRepository interface {
+	List(context.Context, uint, bool) ([]models.TradeReview, error)
+	Remember(context.Context, *models.TradeReview) (*models.TradeReview, error)
+	Get(context.Context, uint, uint) (*models.TradeReview, error)
+	BeginExtraction(context.Context, uint, uint, string, string) error
+	EndExtraction(context.Context, uint, uint, string) error
+	Draft(context.Context, uint, uint, string, string) error
+	Save(context.Context, uint, uint, string, []*models.Transaction) (int, error)
+}
+
 type Repository struct {
+	Reviews       TradeReviewRepository
 	Stocks        StocksRepository
 	Brokers       BrokerRepository
 	Transactions  TransactionRepository
@@ -61,6 +72,7 @@ type BrokerRepository interface {
 	GetAllBrokerHoldings(userID uint) ([]models.StockHolding, error)
 	AddBrokerData(payload *models.Broker) (*models.Broker, error)
 	DeleteBrokerData(userID uint, brokerName []string) (*models.Broker, error)
+	AdvanceCashSync(ctx context.Context, userID uint, brokerID int, started time.Time) error
 	GetAllBrokers(userID uint) ([]models.Broker, error)
 	GetBrokerByName(userID uint, name string) (*models.Broker, error)
 	UpdateBrokerData(userID uint, id int, payload *models.Broker) (*models.Broker, error)

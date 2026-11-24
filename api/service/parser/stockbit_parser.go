@@ -17,6 +17,8 @@ import (
 // StockbitParser parses trade confirmation PDFs from Stockbit Sekuritas
 type StockbitParser struct{}
 
+var ErrNoStockbitTradeRows = errors.New("tidak ada transaksi ditemukan pada PDF Stockbit")
+
 func NewStockbitParser() *StockbitParser {
 	return &StockbitParser{}
 }
@@ -101,7 +103,7 @@ func (p *StockbitParser) parseContent(content string) ([]dto.ParsedTrade, error)
 		if strings.Contains(content, "Allotment Date") || strings.Contains(content, "TC_EIPO") || strings.Contains(content, "Refund") {
 			return nil, ErrEmailNotApplicable
 		}
-		return nil, fmt.Errorf("tidak ada transaksi ditemukan pada PDF Stockbit")
+		return nil, ErrNoStockbitTradeRows
 	}
 
 	buyFees, sellFees := p.extractSummaryFees(lines)

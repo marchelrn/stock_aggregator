@@ -109,7 +109,7 @@ func SetupRoutes(s *contract.Service) *gin.Engine {
 		protected.GET("/cash-breakdown/:id", brokerController.GetCashBreakdown)
 
 		// Transaction routes
-		protected.GET("/transaction/:id", transactionController.GetTransaction)  // Get a specific transaction by ID
+		protected.GET("/transaction/:id", transactionController.GetTransaction) // Get a specific transaction by ID
 		protected.GET("/api/history", transactionController.History)
 		protected.GET("/transactions", transactionController.GetAllTransactions) // Get all transactions
 		protected.POST("/transaction", transactionController.CreateTransaction)
@@ -119,6 +119,11 @@ func SetupRoutes(s *contract.Service) *gin.Engine {
 		protected.GET("/api/market/:ticker", yahooController.GetMarket)
 		protected.POST("/api/gmail/sync", gmailController.SyncTradeConfirmations)
 		protected.POST("/api/gmail/setup-sync", gmailController.SyncSetupHistorical)
+		protected.GET("/api/gmail/setup-sync/:id", gmailController.SetupJobStatus)
+		protected.GET("/api/gmail/reviews", gmailController.ListReviews)
+		protected.GET("/api/gmail/reviews/:id", gmailController.ReviewDraft)
+		protected.POST("/api/gmail/reviews/:id/extract", gmailController.ExtractReview)
+		protected.POST("/api/gmail/reviews/:id/confirm", gmailController.ConfirmReview)
 		protected.POST("/api/gmail/sync-cash", gmailController.SyncCashMutations)
 		protected.GET("/api/gmail/cash-mutations", gmailController.GetCashMutations)
 		protected.GET("/api/gmail/status", gmailController.GetSyncStatus)

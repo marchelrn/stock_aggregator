@@ -21,7 +21,7 @@ import (
 func TradeCashDelta(t *models.Transaction) float64 {
 	gross := float64(t.Lot) * 100 * t.Price
 	tax := t.Tax
-	if tax == 0 {
+	if tax == 0 && !t.ReviewedFee {
 		if t.Type == models.TypeBuy {
 			tax = gross * 0.0015
 		} else {

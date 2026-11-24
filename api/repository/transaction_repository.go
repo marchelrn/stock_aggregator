@@ -326,6 +326,9 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 			trade.Ticker, trade.Type, trade.Lot,
 			strconv.FormatFloat(trade.Price, 'f', -1, 64),
 			trade.Date.Format("2006-01-02"), trade.BrokerID)
+		if trade.ReviewedFee && trade.RefNo != "" {
+			identity += "|" + trade.RefNo
+		}
 		if _, dup := seenIdentities[identity]; dup {
 			continue
 		}
@@ -416,7 +419,9 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 					// time.Time would shift the day for late-evening trades.
 					query := tx.Where("user_id = ? AND ticker = ? AND type = ? AND lot = ? AND price = ? AND broker_id = ?",
 						trade.UserID, trade.Ticker, trade.Type, trade.Lot, trade.Price, trade.BrokerID)
-					if trade.RefNo != "" {
+					if trade.ReviewedFee && trade.RefNo != "" {
+						query = query.Where("(ref_no = ? OR (COALESCE(ref_no,'')='' AND DATE(date)=?))", trade.RefNo, trade.Date.Format("2006-01-02"))
+					} else if trade.RefNo != "" {
 						query = query.Where("(ref_no = ? OR DATE(date) = ?)",
 							trade.RefNo, trade.Date.Format("2006-01-02"))
 					} else {
@@ -556,7 +561,7 @@ func CalculateHoldingAfterBatch(currentLot int, currentAvgPrice float64, trades 
 	for _, trade := range trades {
 		gross := float64(trade.Lot) * 100 * trade.Price
 		tax := trade.Tax
-		if tax == 0 {
+		if tax == 0 && !trade.ReviewedFee {
 			switch trade.Type {
 			case models.TypeBuy:
 				tax = gross * 0.0015

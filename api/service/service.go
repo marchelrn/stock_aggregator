@@ -19,12 +19,14 @@ func New(repo *contract.Repository) (*contract.Service, error) {
 
 	yahooSvc := ImplYahooService(repo.Yahoo)
 
+	gmail := ImplGmailService(repo.Auth, dispatcher, repo.Transactions, repo.CashMutations, repo.Brokers, repo.GmailCache)
+	gmail.Reviews = repo.Reviews
 	return &contract.Service{
 		Stocks:      ImplStocksService(repo.Stocks, repo.Brokers, repo.Transactions, yahooSvc),
 		Brokers:     ImplBrokersService(repo.Brokers),
 		Transaction: ImplTransactionService(repo),
 		Yahoo:       yahooSvc,
 		Auth:        ImplAuthService(repo.Auth),
-		Gmail:       ImplGmailService(repo.Auth, dispatcher, repo.Transactions, repo.CashMutations, repo.Brokers, repo.GmailCache),
+		Gmail:       gmail,
 	}, nil
 }

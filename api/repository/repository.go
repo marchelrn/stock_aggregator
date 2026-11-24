@@ -8,6 +8,7 @@ import (
 
 func New(db *gorm.DB) *contract.Repository {
 	return &contract.Repository{
+		Reviews:       &TradeReviewRepository{db},
 		Stocks:        ImplStocksRepository(db),
 		Brokers:       ImplBrokersRepository(db),
 		Transactions:  ImplTransactionRepository(db),

@@ -1,0 +1,8 @@
+{
+  "required_markers": [
+    "(?i)(?:trade\\s*confirmation|this\\s+is\\s+to\\s+confirm\\s+the\\s+following\\s+activity\\s+on\\s+your\\s+account)",
+    "(?i)\\bREF\\s*#"
+  ],
+  "start_pattern": "(?im)^[ \\t]*REF\\s*#\\s+Board\\s+Share\\s+Lot\\s+Quantity\\s+Price\\s+Buy\\s+Sell[ \\t]*\\r?\\n",
+  "date_pattern": "(?i)Transaction\\s+Date\\s*:?\\s*(\\d{2}/\\d{2}/\\d{4})"
+}

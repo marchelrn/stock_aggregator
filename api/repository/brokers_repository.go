@@ -1,7 +1,9 @@
 package repository
 
 import (
+	"context"
 	"math"
+	"time"
 
 	"github.com/marchelrn/stock_api/models"
 	errs "github.com/marchelrn/stock_api/pkg/error"
@@ -42,7 +44,11 @@ func (r *BrokersRepository) AddBrokerData(payload *models.Broker) (*models.Broke
 		return nil, err
 	}
 	payload.CashBase = payload.Cash
-	payload.CashBaseAsOf = &registered
+	baseline := time.Now().UTC()
+	if registered.After(baseline) {
+		baseline = registered
+	}
+	payload.CashBaseAsOf = &baseline
 	if err := r.db.Create(payload).Error; err != nil {
 		return nil, err
 	}
@@ -69,6 +75,12 @@ func (r *BrokersRepository) DeleteBrokerData(userID uint, brokerName []string) (
 	}
 
 	return &broker, nil
+}
+
+func (r *BrokersRepository) AdvanceCashSync(ctx context.Context, userID uint, brokerID int, started time.Time) error {
+	return r.db.WithContext(ctx).Exec(`UPDATE brokers SET last_cash_sync_at = ?
+		WHERE user_id = ? AND id = ? AND (last_cash_sync_at IS NULL OR last_cash_sync_at < ?)`,
+		started, userID, brokerID, started).Error
 }
 
 func (r *BrokersRepository) GetAllBrokers(userID uint) ([]models.Broker, error) {

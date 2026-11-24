@@ -84,7 +84,7 @@ func TestGmailSchedulerSyncsEligibleUsersInsideWindow(t *testing.T) {
 	}
 }
 
-func TestGmailSchedulerSkipsRecentlySyncedUser(t *testing.T) {
+func TestGmailSchedulerCashRunsAfterRecentTradeSync(t *testing.T) {
 	gmail := &fakeGmailService{}
 	at := time.Date(2026, time.November, 16, 17, 0, 0, 0, time.FixedZone("WITA", 8*60*60))
 	recent := at.Add(-10 * time.Minute)
@@ -99,8 +99,8 @@ func TestGmailSchedulerSkipsRecentlySyncedUser(t *testing.T) {
 	if len(gmail.tradeCalls) != 2 || gmail.tradeCalls[0] != 1 {
 		t.Fatalf("kedua user harus mendapat tick TC, dapat %v", gmail.tradeCalls)
 	}
-	if len(gmail.cashCalls) != 1 || gmail.cashCalls[0] != 2 {
-		t.Fatalf("hanya user 2 yang boleh disinkronkan kas, dapat %v", gmail.cashCalls)
+	if len(gmail.cashCalls) != 2 || gmail.cashCalls[0] != 1 || gmail.cashCalls[1] != 2 {
+		t.Fatalf("kedua user harus disinkronkan kas, dapat %v", gmail.cashCalls)
 	}
 }
 

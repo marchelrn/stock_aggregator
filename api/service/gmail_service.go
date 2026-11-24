@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 )
 
 type GmailServiceImpl struct {
+	Reviews          contract.TradeReviewRepository
 	AuthRepository   contract.AuthRepository
 	TradeParser      TradeConfirmationParser
 	TransactionRepo  contract.TransactionRepository
@@ -83,13 +85,14 @@ func (s *GmailServiceImpl) selectorsForKinds(ctx context.Context, kinds ...strin
 }
 
 const gmailSyncTimeout = 5 * time.Minute
+const gmailHistoryTimeout = 30 * time.Minute
 
 // Earlier trade markers could include messages discarded by the broker filter.
 const tradeConfirmationCacheType = "trade_confirmation:v3"
 
-const cashMutationCacheType = "cash_mutation:v2"
+const cashMutationCacheType = "cash_mutation:v3"
 
-func ImplGmailService(authRepo contract.AuthRepository, parser TradeConfirmationParser, txRepo contract.TransactionRepository, cashRepo contract.CashMutationRepository, brokerRepo contract.BrokerRepository, cacheRepo contract.GmailCacheRepository) contract.GmailService {
+func ImplGmailService(authRepo contract.AuthRepository, parser TradeConfirmationParser, txRepo contract.TransactionRepository, cashRepo contract.CashMutationRepository, brokerRepo contract.BrokerRepository, cacheRepo contract.GmailCacheRepository) *GmailServiceImpl {
 	return &GmailServiceImpl{
 		AuthRepository:   authRepo,
 		TradeParser:      parser,
@@ -252,7 +255,7 @@ func (s *GmailServiceImpl) SyncTradeConfirmations(userID uint) (*dto.GmailSyncRe
 // SyncTradeConfirmationsFullContext performs a full sync of all historical trade confirmations
 func (s *GmailServiceImpl) SyncTradeConfirmationsFullContext(ctx context.Context, userID uint, brokerName string) (*dto.GmailSyncResponse, error) {
 	startedAt := time.Now()
-	ctx, cancel := context.WithTimeout(ctx, gmailSyncTimeout)
+	ctx, cancel := context.WithTimeout(ctx, gmailHistoryTimeout)
 	defer cancel()
 
 	// Find user
@@ -342,9 +345,20 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 		return nil, err
 	}
 	var allTrades []dto.ParsedTrade
+	var pendingPDFs []dto.PendingTradePDF
 	var emailCount int
-	var skippedCount int
+	var skippedCount, recoveredCount int
 	pendingMessages := make(map[string]int)
+	knownReviews := make(map[string][]models.TradeReview)
+	if s.Reviews != nil {
+		rows, err := s.Reviews.List(ctx, user.Id, true)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			knownReviews[row.Digest] = append(knownReviews[row.Digest], row)
+		}
+	}
 	pageToken := ""
 
 	// Load processed message IDs in bulk (more efficient than checking one-by-one)
@@ -380,12 +394,12 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 				// message is retried on the next sync instead of being skipped forever.
 				return nil, fmt.Errorf("get Gmail message %s: %w", msg.Id, err)
 			}
-			trades, err := s.processMessageAttachments(ctx, gmailSrv, fullMsg)
+			reviewed := 0
+			trades, unread, err := s.processMessageAttachments(ctx, gmailSrv, fullMsg, user.Id, knownReviews, &reviewed, &recoveredCount)
 			if err != nil {
-				// Inapplicable/unreadable PDFs are soft-skipped inside
-				// processMessageAttachments; any error reaching here is fatal.
 				return nil, fmt.Errorf("process Gmail message %s: %w", msg.Id, err)
 			}
+			pendingPDFs = append(pendingPDFs, unread...)
 			accepted := 0
 			for _, trade := range trades {
 				if names != nil && names[strings.ToLower(strings.TrimSpace(trade.BrokerName))] == 0 {
@@ -397,7 +411,7 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 			emailCount++
 
 			// A skipped/unreadable PDF is not proof of a completed import.
-			if accepted > 0 && accepted == len(trades) {
+			if len(unread) == 0 && accepted+reviewed > 0 && accepted == len(trades) {
 				pendingMessages[msg.Id] = len(trades)
 			}
 		}
@@ -446,7 +460,7 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 
 	// Save a copy so an unsuccessful repository update cannot advance the
 	// caller's checkpoint. Use the start time to retain mail arriving mid-sync.
-	if selected == "" {
+	if selected == "" && len(pendingPDFs) == 0 {
 		updated := *user
 		updated.LastGmailSyncAt = &startedAt
 		if _, err := s.AuthRepository.UpdateUser(&updated); err != nil {
@@ -455,6 +469,7 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 		*user = updated
 	}
 
+	syncedCount += recoveredCount
 	message := fmt.Sprintf("Berhasil parse %d trade dari %d email (%d di-skip dari cache), disimpan %d trade", len(allTrades), emailCount, skippedCount, syncedCount)
 	if s.TransactionRepo == nil {
 		message = fmt.Sprintf("Berhasil parse %d trade dari %d email (%d di-skip); belum disimpan", len(allTrades), emailCount, skippedCount)
@@ -463,7 +478,12 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 	} else if emailCount == 0 {
 		message = fmt.Sprintf("Semua %d email sudah pernah diproses (dari cache)", skippedCount)
 	}
+	if len(pendingPDFs) > 0 {
+		message = fmt.Sprintf("%d transaksi baru disimpan. %d PDF belum terbaca. %s: %s", syncedCount, len(pendingPDFs), pendingPDFs[0].Filename, pendingPDFs[0].Reason)
+		log.Printf("Gmail trade sync: %d pending PDFs; checkpoint retained", len(pendingPDFs))
+	}
 	return &dto.GmailSyncResponse{
+		PendingPDFs:  pendingPDFs,
 		StatusCode:   http.StatusOK,
 		Message:      message,
 		TradesFound:  len(allTrades),
@@ -517,7 +537,11 @@ func (s *GmailServiceImpl) GetCashMutations(userID uint) (*dto.CashMutationsList
 
 // SyncCashMutationsContext allows callers to cancel Gmail and token refresh requests.
 func (s *GmailServiceImpl) SyncCashMutationsContext(ctx context.Context, userID uint, brokerName string) (*dto.GmailCashSyncResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, gmailSyncTimeout)
+	timeout := gmailSyncTimeout
+	if brokerName != "" {
+		timeout = gmailHistoryTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	// Find user
@@ -543,41 +567,91 @@ func (s *GmailServiceImpl) syncCashMutations(ctx context.Context, gmailSrv *gmai
 	return s.syncBrokerCash(ctx, gmailSrv, user, "")
 }
 func (s *GmailServiceImpl) syncBrokerCash(ctx context.Context, gmailSrv *gmail.Service, user *models.Users, selected string) (*dto.GmailCashSyncResponse, error) {
-	ctx, _, err := s.brokerScope(ctx, user.Id, selected)
+	ctx, brokers, err := s.brokerScope(ctx, user.Id, selected)
 	if err != nil {
 		return nil, err
 	}
-	registered := parser.BrokerScope(ctx)
-	if registered != nil && len(registered) == 0 {
-		return &dto.GmailCashSyncResponse{StatusCode: http.StatusOK}, nil
+	if s.BrokerRepo == nil {
+		return s.importBrokerCash(ctx, gmailSrv, user, nil, user.CreatedAt)
 	}
+	total := &dto.GmailCashSyncResponse{StatusCode: http.StatusOK}
+	var failures []error
+	for _, broker := range brokers {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		scope := parser.WithBrokerScope(ctx, map[string]int{strings.ToLower(strings.TrimSpace(broker.Name)): broker.ID})
+		since := broker.LastCashSyncAt
+		if selected != "" {
+			since = nil
+		}
+		started := time.Now().UTC()
+		baseline := user.CreatedAt
+		if broker.CashBaseAsOf != nil && broker.CashBaseAsOf.After(baseline) {
+			baseline = *broker.CashBaseAsOf
+		}
+		result, err := s.importBrokerCash(scope, gmailSrv, user, since, baseline)
+		if err == nil && s.CashMutationRepo != nil {
+			err = s.BrokerRepo.AdvanceCashSync(ctx, user.Id, broker.ID, started)
+		}
+		if err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", broker.Name, err))
+			continue
+		}
+		total.MutationsFound += result.MutationsFound
+		total.MutationsSynced += result.MutationsSynced
+		total.ParsedMutations = append(total.ParsedMutations, result.ParsedMutations...)
+		total.Message = result.Message
+	}
+	if len(failures) > 0 {
+		return nil, errors.Join(failures...)
+	}
+	if len(brokers) != 1 {
+		total.Message = fmt.Sprintf("Disimpan %d mutasi kas dari %d broker", total.MutationsSynced, len(brokers))
+	}
+	return total, nil
+}
 
-	if user.CreatedAt.IsZero() {
-		return nil, fmt.Errorf("user registration time is required for cash sync")
-	}
+func (s *GmailServiceImpl) importBrokerCash(ctx context.Context, gmailSrv *gmail.Service, user *models.Users, since *time.Time, baseline time.Time) (*dto.GmailCashSyncResponse, error) {
+	registered := parser.BrokerScope(ctx)
 	cashParser, err := s.cashParserSnapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
-	// Cash history is not imported. Keep this independent of the trade
-	// checkpoint and use epoch seconds rather than Gmail's day-only cutoff.
-	query, err := s.cashMutationQuery(ctx, nil)
+	query, err := s.cashMutationQuery(ctx, since)
 	if err != nil {
 		return nil, err
 	}
-	query += fmt.Sprintf(" after:%d", user.CreatedAt.Unix())
 	processedIDs := make(map[string]bool)
 	if s.GmailCacheRepo != nil {
 		cached, err := s.GmailCacheRepo.GetProcessedMessageIDs(ctx, user.Id, cashMutationCacheType)
 		if err != nil {
 			log.Printf("Warning: failed to load cash Gmail cache: %v", err)
 		} else {
-			processedIDs = cached
+			if cached != nil {
+				processedIDs = cached
+			}
 		}
 	}
 	var allMutations []dto.ParsedCashMutation
 	var emailCount int
 	var syncedCount int
+	var balanceEvents []dto.ParsedCashMutation
+	save := func(batch []dto.ParsedCashMutation) error {
+		count, err := s.persistCashMutations(user.Id, registered, batch)
+		if err != nil {
+			return err
+		}
+		syncedCount += count
+		if s.CashMutationRepo != nil && s.GmailCacheRepo != nil && registered != nil {
+			for _, m := range batch {
+				if err := s.GmailCacheRepo.MarkProcessed(ctx, user.Id, m.MessageID, cashMutationCacheType, 1); err != nil {
+					log.Printf("Warning: failed to cache persisted cash message %s: %v", m.MessageID, err)
+				}
+			}
+		}
+		return nil
+	}
 	pageToken := ""
 	for {
 		messages, err := gmailSrv.Users.Messages.List("me").Q(query).MaxResults(50).PageToken(pageToken).Context(ctx).Do()
@@ -598,45 +672,30 @@ func (s *GmailServiceImpl) syncBrokerCash(ctx context.Context, gmailSrv *gmail.S
 			return nil, err
 		}
 		var pageMutations []dto.ParsedCashMutation
-		pendingMessages := make(map[string]int)
 		for _, fullMsg := range fullMessages {
 			mutations, err := s.processCashMessageWithParser(ctx, gmailSrv, fullMsg, cashParser)
 			if err != nil {
 				return nil, fmt.Errorf("process Gmail message %s: %w", fullMsg.Id, err)
 			}
-			kept := 0
 			for _, mutation := range mutations {
-				date, err := time.Parse("2006-01-02", mutation.Date)
-				if err != nil {
-					return nil, fmt.Errorf("invalid cash mutation date %q: %w", mutation.Date, err)
+				if registered != nil && registered[strings.ToLower(strings.TrimSpace(mutation.BrokerName))] == 0 {
+					continue
 				}
-				if date.After(user.CreatedAt) && (registered == nil || registered[strings.ToLower(strings.TrimSpace(mutation.BrokerName))] != 0) {
+				allMutations = append(allMutations, mutation)
+				if mutation.EventTime.After(baseline) {
+					balanceEvents = append(balanceEvents, mutation)
+				} else {
 					pageMutations = append(pageMutations, mutation)
-					kept++
 				}
-			}
-			if kept > 0 && kept == len(mutations) {
-				pendingMessages[fullMsg.Id] = kept
+				processedIDs[fullMsg.Id] = true
 			}
 			emailCount++
 		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		count, err := s.persistCashMutations(user.Id, pageMutations)
-		if err != nil {
+		if err := save(pageMutations); err != nil {
 			return nil, err
-		}
-		syncedCount += count
-		allMutations = append(allMutations, pageMutations...)
-		if s.CashMutationRepo != nil && s.GmailCacheRepo != nil && registered != nil {
-			for messageID, count := range pendingMessages {
-				if err := s.GmailCacheRepo.MarkProcessed(ctx, user.Id, messageID, cashMutationCacheType, count); err != nil {
-					log.Printf("Warning: failed to cache persisted cash message %s: %v", messageID, err)
-					continue
-				}
-				processedIDs[messageID] = true
-			}
 		}
 		pageToken = messages.NextPageToken
 		if pageToken == "" {
@@ -648,9 +707,12 @@ func (s *GmailServiceImpl) syncBrokerCash(ctx context.Context, gmailSrv *gmail.S
 		return nil, err
 	}
 
-	// Do not touch LastGmailSyncAt here: it is the trade-confirmation
-	// checkpoint, and advancing it from the cash sync would skip trade
-	// emails that arrived since the last trade sync.
+	sort.SliceStable(balanceEvents, func(i, j int) bool {
+		return balanceEvents[i].EventTime.Before(balanceEvents[j].EventTime)
+	})
+	if err := save(balanceEvents); err != nil {
+		return nil, err
+	}
 
 	message := fmt.Sprintf("Berhasil parse %d mutasi kas dari %d email, disimpan %d mutasi", len(allMutations), emailCount, syncedCount)
 	if s.CashMutationRepo == nil {
@@ -667,32 +729,25 @@ func (s *GmailServiceImpl) syncBrokerCash(ctx context.Context, gmailSrv *gmail.S
 	}, nil
 }
 
-func (s *GmailServiceImpl) persistCashMutations(userID uint, mutations []dto.ParsedCashMutation) (int, error) {
+func (s *GmailServiceImpl) persistCashMutations(userID uint, brokers map[string]int, mutations []dto.ParsedCashMutation) (int, error) {
 	if s.CashMutationRepo == nil || len(mutations) == 0 {
 		return 0, nil
 	}
 	requests := make([]*models.CashMutation, 0, len(mutations))
 	for _, mutation := range mutations {
-		var brokerID int
-		if s.BrokerRepo != nil {
-			broker, err := s.BrokerRepo.GetBrokerByName(userID, mutation.BrokerName)
-			if err != nil {
-				return 0, fmt.Errorf("load broker for cash mutation: %w", err)
-			}
-			if broker == nil {
-				return 0, errors.New("broker for cash mutation not found")
-			}
-			brokerID = broker.ID
+		brokerID := brokers[strings.ToLower(strings.TrimSpace(mutation.BrokerName))]
+		if brokers != nil && brokerID == 0 {
+			return 0, errors.New("broker for cash mutation not found")
 		}
-		date, err := time.Parse("2006-01-02", mutation.Date)
-		if err != nil {
-			return 0, fmt.Errorf("invalid cash mutation date %q: %w", mutation.Date, err)
+		ref := mutation.RefNo
+		if ref == "" {
+			ref = "gmail:" + mutation.MessageID
 		}
 		requests = append(requests, &models.CashMutation{
 			UserID: userID, BrokerID: brokerID, BrokerName: mutation.BrokerName,
 			Type: models.CashMutationType(mutation.Type), Amount: mutation.Amount,
-			Date: date, EmailReceivedAt: mutation.EmailReceivedAt,
-			Description: mutation.Description, RefNo: mutation.RefNo,
+			Date: mutation.EventTime, EmailReceivedAt: mutation.EmailReceivedAt,
+			Description: mutation.Description, RefNo: ref,
 		})
 	}
 	count, err := s.CashMutationRepo.SyncCashMutationBatch(userID, requests)
@@ -744,7 +799,14 @@ func (s *GmailServiceImpl) cashMutationQuery(ctx context.Context, lastSyncAt *ti
 		return "", errors.New("no active cash email selectors")
 	}
 
-	return selectorQuery(selectors, lastSyncAt)
+	query, err := selectorQuery(selectors, nil)
+	if err != nil {
+		return "", err
+	}
+	if lastSyncAt != nil {
+		query += fmt.Sprintf(" after:%d", lastSyncAt.Unix()-1)
+	}
+	return query, nil
 }
 
 func selectorQuery(selectors []parser.EmailMetadata, lastSyncAt *time.Time) (string, error) {
@@ -869,6 +931,7 @@ func (s *GmailServiceImpl) processCashMessageWithParser(ctx context.Context, gma
 				}
 				receivedAt := emailDate
 				mutations = append(mutations, dto.ParsedCashMutation{
+					EventTime: parsed.Date, MessageID: msg.Id,
 					BrokerName:      parsed.BrokerName,
 					Type:            string(parsed.Type),
 					Amount:          parsed.Amount,
@@ -1041,9 +1104,9 @@ func extractMessageDate(msg *gmail.Message) time.Time {
 }
 
 // processMessageAttachments downloads and parses PDF attachments from a Gmail message
-func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailSrv *gmail.Service, msg *gmail.Message) ([]dto.ParsedTrade, error) {
+func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailSrv *gmail.Service, msg *gmail.Message, uid uint, known map[string][]models.TradeReview, reviewed, recoveredCount *int) ([]dto.ParsedTrade, []dto.PendingTradePDF, error) {
 	if msg == nil || msg.Payload == nil {
-		return nil, fmt.Errorf("Gmail message has no MIME payload")
+		return nil, nil, fmt.Errorf("Gmail message has no MIME payload")
 	}
 	emailDate := extractMessageDate(msg)
 	meta := parser.EmailMetadata{}
@@ -1060,6 +1123,7 @@ func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailS
 	}
 
 	var trades []dto.ParsedTrade
+	var pending []dto.PendingTradePDF
 	foundPDF := false
 	var visit func(*gmail.MessagePart) error
 	visit = func(part *gmail.MessagePart) error {
@@ -1074,23 +1138,38 @@ func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailS
 			if part.Body == nil {
 				return fmt.Errorf("PDF %q has no body", part.Filename)
 			}
-			data := part.Body.Data
-			if data == "" && part.Body.AttachmentId != "" {
-				attachment, err := gmailSrv.Users.Messages.Attachments.Get("me", msg.Id, part.Body.AttachmentId).Context(ctx).Do()
-				if err != nil {
-					return fmt.Errorf("download PDF %q: %w", part.Filename, err)
+			pdfBytes, err := readGmailPDF(ctx, gmailSrv, msg.Id, part)
+			if err != nil {
+				return err
+			}
+			meta.Filename = part.Filename
+			digest := fmt.Sprintf("%x", sha256.Sum256(pdfBytes))
+			match, canReview := s.TradeParser.(interface {
+				ReviewBroker(context.Context, parser.EmailMetadata) (string, error)
+			})
+			hold := func(row models.TradeReview) {
+				if row.State == "saved" {
+					*reviewed++
+					return
 				}
-				data = attachment.Data
+				pending = append(pending, dto.PendingTradePDF{Filename: part.Filename, Reason: "Periksa dokumen di bagian PDF perlu ditinjau."})
 			}
-			if data == "" {
-				return fmt.Errorf("PDF %q has no data", part.Filename)
-			}
-			pdfBytes, err := base64.URLEncoding.DecodeString(data)
-			if err != nil {
-				pdfBytes, err = base64.RawURLEncoding.DecodeString(data)
-			}
-			if err != nil {
-				return fmt.Errorf("decode PDF %q: %w", part.Filename, err)
+			var previous *models.TradeReview
+			if len(known[digest]) > 0 && canReview {
+				broker, err := match.ReviewBroker(ctx, meta)
+				if err != nil {
+					return err
+				}
+				for _, row := range known[digest] {
+					if row.BrokerID == parser.BrokerScope(ctx)[strings.ToLower(broker)] {
+						if row.State == "pending" {
+							previous = &row
+							break
+						}
+						hold(row)
+						return nil
+					}
+				}
 			}
 			if s.TradeParser == nil {
 				return fmt.Errorf("trade confirmation parser is not configured")
@@ -1102,7 +1181,42 @@ func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailS
 			} else {
 				parsed, err = s.TradeParser.Parse(pdfBytes)
 			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if previous != nil && err != nil && (!geminiSyncEnabled(ctx) || errors.Is(err, parser.ErrEmailNotApplicable)) {
+				hold(*previous)
+				return nil
+			}
+			if err != nil && ctx.Err() == nil && !errors.Is(err, parser.ErrEmailNotApplicable) && canReview && s.Reviews != nil {
+				broker, lookupErr := match.ReviewBroker(ctx, meta)
+				if lookupErr != nil {
+					return lookupErr
+				}
+				if id := parser.BrokerScope(ctx)[strings.ToLower(broker)]; id > 0 {
+					row, saveErr := s.Reviews.Remember(ctx, &models.TradeReview{UserID: uid, BrokerID: id, BrokerName: broker, MessageID: msg.Id, PartID: part.PartId, Digest: digest, Filename: part.Filename, State: "pending"})
+					if saveErr != nil {
+						return saveErr
+					}
+					if row.State == "pending" && geminiSyncEnabled(ctx) {
+						n, found, fallbackErr := s.syncGeminiPDF(ctx, uid, row.ID, pdfBytes)
+						if fallbackErr == nil {
+							row.State = "saved"
+							*reviewed += found
+							*recoveredCount += n
+						} else {
+							pending = append(pending, dto.PendingTradePDF{Filename: part.Filename, Reason: "Ekstraksi Gemini belum selesai atau hasil belum lolos validasi. Coba lagi atau tinjau PDF."})
+						}
+						return nil
+					}
+					known[digest] = append(known[digest], *row)
+					hold(*row)
+					return nil
+				}
+			}
 			switch {
+			case errors.Is(err, parser.ErrNoStockbitTradeRows):
+				pending = append(pending, dto.PendingTradePDF{Filename: part.Filename, Reason: err.Error()})
 			case errors.Is(err, parser.ErrEmailNotApplicable) || (err != nil && (strings.Contains(err.Error(), "no extractable text") || strings.Contains(err.Error(), "no active template matches"))):
 				// An unrelated or unreadable PDF is not a fatal parse; keep visiting siblings.
 				log.Printf("Skipping unreadable or inapplicable PDF %q: %v", part.Filename, err)
@@ -1116,6 +1230,22 @@ func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailS
 						parsed[i].Date = emailDate
 					}
 				}
+				if previous != nil {
+					batch := make([]*models.Transaction, 0, len(parsed))
+					for _, trade := range parsed {
+						if !strings.EqualFold(trade.BrokerName, previous.BrokerName) {
+							return errors.New("Broker hasil ekstraksi berbeda dari dokumen.")
+						}
+						batch = append(batch, s.convertParsedTradeToTransaction(&models.Users{Id: uid}, &trade, previous.BrokerID))
+					}
+					count, saveErr := s.Reviews.Save(ctx, uid, previous.ID, "pending", batch)
+					if saveErr != nil {
+						return saveErr
+					}
+					*reviewed += len(batch)
+					*recoveredCount += count
+					return nil
+				}
 				trades = append(trades, parsed...)
 			}
 		}
@@ -1127,10 +1257,10 @@ func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailS
 		return nil
 	}
 	if err := visit(msg.Payload); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !foundPDF {
-		return nil, fmt.Errorf("Gmail message contains no PDF trades")
+		return nil, nil, fmt.Errorf("Gmail message contains no PDF trades")
 	}
-	return trades, nil
+	return trades, pending, nil
 }
