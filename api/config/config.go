@@ -36,6 +36,10 @@ func Load() {
 		log.Printf("Error loading .env file: %v", err)
 	}
 
+	LoadFromEnvironment()
+}
+
+func LoadFromEnvironment() {
 	port, err := strconv.Atoi(os.Getenv("PORT"))
 	if err != nil {
 		port = 8080

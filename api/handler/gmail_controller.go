@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/marchelrn/stock_api/contract"
 	errs "github.com/marchelrn/stock_api/pkg/error"
+	"github.com/marchelrn/stock_api/service"
 )
 
 type GmailController struct {
@@ -42,10 +43,11 @@ func (c *GmailController) SyncTradeConfirmations(ctx *gin.Context) {
 	var response interface{}
 	var err error
 
+	syncCtx := service.WithGeminiSync(ctx.Request.Context(), ctx.Query("gemini") == "1")
 	if fullSync {
-		response, err = c.service.Gmail.SyncTradeConfirmationsFullContext(ctx.Request.Context(), uint(uid), "")
+		response, err = c.service.Gmail.SyncTradeConfirmationsFullContext(syncCtx, uint(uid), "")
 	} else {
-		response, err = c.service.Gmail.SyncTradeConfirmations(uint(uid))
+		response, err = c.service.Gmail.SyncTradeConfirmationsContext(syncCtx, uint(uid))
 	}
 
 	if err != nil {
@@ -85,7 +87,7 @@ func (c *GmailController) SyncSetupHistorical(ctx *gin.Context) {
 		c.startSetupJob(ctx, uint(uid), broker)
 		return
 	}
-	result, status := c.runSetup(ctx.Request.Context(), uint(uid), broker, false)
+	result, status := c.runSetup(service.WithGeminiSync(ctx.Request.Context(), ctx.Query("gemini") == "1"), uint(uid), broker, false)
 	ctx.JSON(status, result)
 }
 

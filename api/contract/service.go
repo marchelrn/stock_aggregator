@@ -27,6 +27,7 @@ type AuthService interface {
 }
 
 type GmailService interface {
+	SyncTradeConfirmationsContext(context.Context, uint) (*dto.GmailSyncResponse, error)
 	ListReviews(context.Context, uint) ([]models.TradeReview, error)
 	ReviewDraft(context.Context, uint, uint) (*dto.TradeDraft, error)
 	ExtractReview(context.Context, uint, uint, []byte) (*dto.TradeDraft, error)

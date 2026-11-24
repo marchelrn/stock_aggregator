@@ -1184,7 +1184,7 @@ func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailS
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if previous != nil && err != nil {
+			if previous != nil && err != nil && (!geminiSyncEnabled(ctx) || errors.Is(err, parser.ErrEmailNotApplicable)) {
 				hold(*previous)
 				return nil
 			}
@@ -1197,6 +1197,17 @@ func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailS
 					row, saveErr := s.Reviews.Remember(ctx, &models.TradeReview{UserID: uid, BrokerID: id, BrokerName: broker, MessageID: msg.Id, PartID: part.PartId, Digest: digest, Filename: part.Filename, State: "pending"})
 					if saveErr != nil {
 						return saveErr
+					}
+					if row.State == "pending" && geminiSyncEnabled(ctx) {
+						n, found, fallbackErr := s.syncGeminiPDF(ctx, uid, row.ID, pdfBytes)
+						if fallbackErr == nil {
+							row.State = "saved"
+							*reviewed += found
+							*recoveredCount += n
+						} else {
+							pending = append(pending, dto.PendingTradePDF{Filename: part.Filename, Reason: "Ekstraksi Gemini belum selesai atau hasil belum lolos validasi. Coba lagi atau tinjau PDF."})
+						}
+						return nil
 					}
 					known[digest] = append(known[digest], *row)
 					hold(*row)

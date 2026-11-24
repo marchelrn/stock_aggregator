@@ -10,10 +10,13 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/marchelrn/stock_api/dto"
 	errs "github.com/marchelrn/stock_api/pkg/error"
 )
+
+const reviewExtractionTimeout = 200 * time.Second
 
 const maxReviewBytes = 8 << 20
 
@@ -71,10 +74,16 @@ func extractGemini(ctx context.Context, client *http.Client, key, model, mime st
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, &errs.AppError{Code: http.StatusGatewayTimeout, Message: "Waktu tunggu Gemini habis. Dokumen masih bisa dicoba lagi."}
+		}
 		return nil, errors.New("Gemini tidak dapat dihubungi. Coba lagi.")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
+		if resp.StatusCode == http.StatusServiceUnavailable {
+			return nil, &errs.AppError{Code: http.StatusServiceUnavailable, Message: "Gemini sedang tidak tersedia. Coba lagi nanti."}
+		}
 		if resp.StatusCode == 429 {
 			return nil, errs.TooManyRequests("Kuota Gemini sedang habis. Coba lagi nanti.")
 		}

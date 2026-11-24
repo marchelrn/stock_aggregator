@@ -89,7 +89,7 @@ func (s *GmailServiceImpl) ExtractReview(ctx context.Context, uid, id uint, crop
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 50*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, reviewExtractionTimeout)
 	defer cancel()
 	mime := "application/pdf"
 	data := crop
@@ -168,4 +168,42 @@ func (s *GmailServiceImpl) ConfirmReview(ctx context.Context, uid, id uint, d dt
 		return 0, errs.UnprocessableEntity(err.Error())
 	}
 	return s.Reviews.Save(ctx, uid, id, "review", trades)
+}
+
+type geminiSyncKey struct{}
+
+func WithGeminiSync(ctx context.Context, consent bool) context.Context {
+	return context.WithValue(ctx, geminiSyncKey{}, consent)
+}
+func geminiSyncEnabled(ctx context.Context) bool {
+	enabled, _ := ctx.Value(geminiSyncKey{}).(bool)
+	return enabled
+}
+
+func (s *GmailServiceImpl) syncGeminiPDF(parent context.Context, uid, id uint, pdf []byte) (int, int, error) {
+	key, model, err := geminiConfig()
+	if err != nil {
+		return 0, 0, err
+	}
+	ctx, cancel := context.WithTimeout(parent, reviewExtractionTimeout)
+	defer cancel()
+	lease := rand.Text()
+	if err := s.Reviews.BeginExtraction(ctx, uid, id, "sync:application/pdf", lease); err != nil {
+		return 0, 0, err
+	}
+	defer func() {
+		release, done := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer done()
+		_ = s.Reviews.EndExtraction(release, uid, id, lease)
+	}()
+	draft, err := extractGemini(ctx, geminiClient, key, model, "application/pdf", pdf)
+	if err != nil {
+		return 0, 0, err
+	}
+	trades, err := validateTradeDraft(*draft)
+	if err != nil {
+		return 0, 0, err
+	}
+	count, err := s.Reviews.Save(ctx, uid, id, "pending", trades)
+	return count, len(trades), err
 }

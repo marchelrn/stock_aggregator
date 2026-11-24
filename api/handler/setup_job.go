@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	errs "github.com/marchelrn/stock_api/pkg/error"
+	"github.com/marchelrn/stock_api/service"
 )
 
 type setupJob struct {
@@ -26,7 +27,7 @@ func (c *GmailController) startSetupJob(ctx *gin.Context, uid uint, broker strin
 	}
 	for _, b := range brokers.Data {
 		if strings.EqualFold(b.Name, broker) {
-			id := c.enqueueSetup(uid, b.Name)
+			id := c.enqueueSetup(uid, b.Name, ctx.Query("gemini") == "1")
 			ctx.JSON(http.StatusAccepted, gin.H{"job_id": id})
 			return
 		}
@@ -34,7 +35,7 @@ func (c *GmailController) startSetupJob(ctx *gin.Context, uid uint, broker strin
 	ctx.JSON(http.StatusBadRequest, gin.H{"error": "Broker belum terhubung ke akun ini."})
 }
 
-func (c *GmailController) enqueueSetup(uid uint, broker string) string {
+func (c *GmailController) enqueueSetup(uid uint, broker string, gemini bool) string {
 	c.jobsMu.Lock()
 	defer c.jobsMu.Unlock()
 	for id, job := range c.jobs {
@@ -47,11 +48,11 @@ func (c *GmailController) enqueueSetup(uid uint, broker string) string {
 	}
 	id := rand.Text()
 	c.jobs[id] = &setupJob{user: uid, broker: broker}
-	go c.executeSetup(id, uid, broker)
+	go c.executeSetup(id, uid, broker, gemini)
 	return id
 }
 
-func (c *GmailController) executeSetup(id string, uid uint, broker string) {
+func (c *GmailController) executeSetup(id string, uid uint, broker string, gemini bool) {
 	var result gin.H
 	defer func() {
 		if recover() != nil {
@@ -67,7 +68,7 @@ func (c *GmailController) executeSetup(id string, uid uint, broker string) {
 			delete(c.jobs, id)
 		})
 	}()
-	result, _ = c.runSetup(context.Background(), uid, broker, true)
+	result, _ = c.runSetup(service.WithGeminiSync(context.Background(), gemini), uid, broker, true)
 }
 
 func (c *GmailController) SetupJobStatus(ctx *gin.Context) {
