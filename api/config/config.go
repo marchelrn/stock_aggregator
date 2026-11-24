@@ -15,6 +15,7 @@ type Config struct {
 	Port              string
 	IsProd            bool
 	DBUrl             string
+	DBName			  string
 	JWTSecret         string
 	FrontendURL       string
 	EncryptionKey     []byte
@@ -63,6 +64,7 @@ func Load() {
 		Port:              strconv.Itoa(port),
 		IsProd:            isProd,
 		DBUrl:             Production(),
+		DBName: 		   os.Getenv("DB_NAME"),
 		JWTSecret:         os.Getenv("JWT_SECRET"),
 		GoogleOAuthConfig: googleOAuthConfig,
 		FrontendURL:       os.Getenv("FRONTEND_URL"),

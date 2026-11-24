@@ -49,7 +49,7 @@ func ConnectDB() (*gorm.DB, *sql.DB) {
 	if err != nil {
 		log.Fatal("Failed to connect to database: ", err)
 	}
-	log.Println("Success Connect to Database")
+	log.Printf("Success Connect to Database %s", cfg.DBName)
 
 	log.Println("Set database configuration")
 	sqlDB, err := db.DB()

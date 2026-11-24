@@ -4,7 +4,7 @@
 
 const env = String(import.meta.env.VITE_ENV || "").toUpperCase();
 const isDevelopment = env === "DEVELOPMENT";
-const localhostUrl = "http://localhost:3030";
+const localhostUrl = "http://localhost:8080";
 const renderUrl =
   import.meta.env.VITE_API_URL || "https://stock-api-8ftf.onrender.com";
 
