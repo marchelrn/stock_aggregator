@@ -4,11 +4,12 @@ import "time"
 
 // Brokers
 type Broker struct {
-	PDFPasswordEncrypted string  `json:"-" gorm:"column:pdf_password_encrypted;not null;default:''"`
-	ID                   int     `json:"id"`
-	UserID               uint    `json:"user_id" gorm:"column:user_id;index"`
-	Name                 string  `json:"name"`
-	Cash                 float64 `json:"cash"`
+	LastCashSyncAt       *time.Time `json:"-" gorm:"column:last_cash_sync_at;->"`
+	PDFPasswordEncrypted string     `json:"-" gorm:"column:pdf_password_encrypted;not null;default:''"`
+	ID                   int        `json:"id"`
+	UserID               uint       `json:"user_id" gorm:"column:user_id;index"`
+	Name                 string     `json:"name"`
+	Cash                 float64    `json:"cash"`
 	// CashBase adalah saldo dasar yang di-set manual oleh user.
 	// Cash events count only after max(Users.CreatedAt, CashBaseAsOf).
 	CashBase     float64    `json:"cash_base"`
@@ -82,19 +83,20 @@ type CashMutation struct {
 // Transactions
 
 type Transaction struct {
-	Id         int       `json:"transaction_id"`
-	UserID     uint      `json:"user_id" gorm:"column:user_id;index"`
-	Ticker     string    `json:"ticker"`
-	Price      float64   `json:"price"`
-	Lot        int       `json:"lot"`
-	StockID    int       `json:"stock_id"`
-	BrokerID   int       `json:"broker_id"`
-	BrokerName string    `json:"broker_name"`
-	Type       Type      `json:"type" gorm:"type:enum('BUY', 'SELL')"`
-	Date       time.Time `json:"date"`
-	AmountDone float64   `json:"amount_done"`
-	Tax        float64   `json:"tax"`
-	RefNo      string    `json:"ref_no,omitempty" gorm:"column:ref_no"`
+	ReviewedFee bool      `json:"-" gorm:"column:reviewed_fee"`
+	Id          int       `json:"transaction_id"`
+	UserID      uint      `json:"user_id" gorm:"column:user_id;index"`
+	Ticker      string    `json:"ticker"`
+	Price       float64   `json:"price"`
+	Lot         int       `json:"lot"`
+	StockID     int       `json:"stock_id"`
+	BrokerID    int       `json:"broker_id"`
+	BrokerName  string    `json:"broker_name"`
+	Type        Type      `json:"type" gorm:"type:enum('BUY', 'SELL')"`
+	Date        time.Time `json:"date"`
+	AmountDone  float64   `json:"amount_done"`
+	Tax         float64   `json:"tax"`
+	RefNo       string    `json:"ref_no,omitempty" gorm:"column:ref_no"`
 }
 
 type Type string

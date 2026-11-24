@@ -231,12 +231,18 @@ type ParsedTrade struct {
 	RefNo      string    `json:"ref_no,omitempty"`
 }
 
+type PendingTradePDF struct {
+	Filename string `json:"filename"`
+	Reason   string `json:"reason"`
+}
+
 type GmailSyncResponse struct {
-	StatusCode   int           `json:"status_code"`
-	Message      string        `json:"message"`
-	TradesFound  int           `json:"trades_found"`
-	TradesSynced int           `json:"trades_synced"`
-	ParsedTrades []ParsedTrade `json:"parsed_trades"`
+	PendingPDFs  []PendingTradePDF `json:"pending_pdfs,omitempty"`
+	StatusCode   int               `json:"status_code"`
+	Message      string            `json:"message"`
+	TradesFound  int               `json:"trades_found"`
+	TradesSynced int               `json:"trades_synced"`
+	ParsedTrades []ParsedTrade     `json:"parsed_trades"`
 }
 
 const GmailOAuthStatePrefix = "gmail."
@@ -261,12 +267,14 @@ type GmailSyncStatusResponse struct {
 }
 
 type ParsedCashMutation struct {
-	BrokerName  string  `json:"broker_name"`
-	Type        string  `json:"type"` // DEPOSIT, WITHDRAW, or DIVIDEND
-	Amount      float64 `json:"amount"`
-	Date        string  `json:"date"`
-	RefNo       string  `json:"ref_no,omitempty"`
-	Description string  `json:"description,omitempty"`
+	EventTime   time.Time `json:"-"`
+	MessageID   string    `json:"-"`
+	BrokerName  string    `json:"broker_name"`
+	Type        string    `json:"type"` // DEPOSIT, WITHDRAW, or DIVIDEND
+	Amount      float64   `json:"amount"`
+	Date        string    `json:"date"`
+	RefNo       string    `json:"ref_no,omitempty"`
+	Description string    `json:"description,omitempty"`
 	// EmailReceivedAt is receipt metadata only; Date controls cash eligibility.
 	EmailReceivedAt *time.Time `json:"email_received_at,omitempty"`
 }

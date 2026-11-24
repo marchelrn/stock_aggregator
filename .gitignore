@@ -20,6 +20,11 @@ skills-lock.json
 # Tests and investigation tools are maintained on the testing branch
 *_test.go
 !api/service/gmail_scheduler_test.go
+!api/service/gmail_cash_history_test.go
+!api/service/gmail_trade_retry_test.go
+!api/handler/setup_job_test.go
+!api/service/parser/attachment_filter_test.go
+!api/service/parser/stockbit_layout_test.go
 !api/repository/withdrawal_balance_test.go
 /frontend/tests/
 /api/cmd/test_*/

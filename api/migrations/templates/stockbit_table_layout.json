@@ -1,0 +1,35 @@
+{
+  "extraction": "plain_then_layout",
+  "fees": [
+    {
+      "pattern": "(?m)^[ \\t]*Commission\\s+([\\d,.]+)\\s+([\\d,.]+)[ \\t]*\\r?$",
+      "buy_group": 1,
+      "sell_group": 2
+    },
+    {
+      "pattern": "(?m)^[ \\t]*V\\.A\\.T Commission\\s+([\\d,.]+)\\s+([\\d,.]+)[ \\t]*\\r?$",
+      "buy_group": 1,
+      "sell_group": 2
+    },
+    {
+      "pattern": "(?m)^[ \\t]*IDX Fee\\s+([\\d,.]+)\\s+([\\d,.]+)[ \\t]*\\r?$",
+      "buy_group": 1,
+      "sell_group": 2
+    },
+    {
+      "pattern": "(?m)^[ \\t]*V\\.A\\.T Levy\\s+([\\d,.]+)\\s+([\\d,.]+)[ \\t]*\\r?$",
+      "buy_group": 1,
+      "sell_group": 2
+    },
+    {
+      "pattern": "(?m)^[ \\t]*Income Tax\\s+([\\d,.]+)\\s+([\\d,.]+)[ \\t]*\\r?$",
+      "buy_group": 1,
+      "sell_group": 2
+    },
+    {
+      "pattern": "(?m)^[ \\t]*Stamp Duty\\s+([\\d,.]+)\\s+([\\d,.]+)[ \\t]*\\r?$",
+      "buy_group": 1,
+      "sell_group": 2
+    }
+  ]
+}

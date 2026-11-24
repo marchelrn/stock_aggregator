@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/marchelrn/stock_api/contract"
@@ -11,6 +13,8 @@ import (
 
 type GmailController struct {
 	service *contract.Service
+	jobsMu  sync.Mutex
+	jobs    map[string]*setupJob
 }
 
 func (c *GmailController) InitService(svc *contract.Service) {
@@ -76,28 +80,42 @@ func (c *GmailController) SyncSetupHistorical(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Pilih broker yang ingin disinkronkan."})
 		return
 	}
-	response := gin.H{}
-	tradeResponse, tradeErr := c.service.Gmail.SyncTradeConfirmationsFullContext(ctx.Request.Context(), uint(uid), strings.TrimSpace(request.BrokerName))
-	if tradeErr != nil {
-		response["trade_error"] = tradeErr.Error()
-	} else {
-		response["trade_sync"] = tradeResponse
-	}
-
-	cashResponse, cashErr := c.service.Gmail.SyncCashMutationsContext(ctx.Request.Context(), uint(uid), strings.TrimSpace(request.BrokerName))
-	if cashErr != nil {
-		response["cash_error"] = cashErr.Error()
-	} else {
-		response["cash_sync"] = cashResponse
-	}
-
-	// Kalau dua-duanya gagal, penyebabnya biasanya token Gmail tidak valid.
-	if tradeErr != nil && cashErr != nil {
-		ctx.JSON(errs.GetStatusCode(tradeErr), response)
+	broker := strings.TrimSpace(request.BrokerName)
+	if ctx.Query("async") == "1" {
+		c.startSetupJob(ctx, uint(uid), broker)
 		return
 	}
+	result, status := c.runSetup(ctx.Request.Context(), uint(uid), broker, false)
+	ctx.JSON(status, result)
+}
 
-	ctx.JSON(http.StatusOK, response)
+func (c *GmailController) runSetup(ctx context.Context, uid uint, broker string, summaryOnly bool) (gin.H, int) {
+	response := gin.H{}
+	trade, tradeErr := c.service.Gmail.SyncTradeConfirmationsFullContext(ctx, uid, broker)
+	if tradeErr != nil {
+		response["trade_error"] = "Transaksi saham: " + tradeErr.Error()
+	} else {
+		if summaryOnly && trade != nil {
+			trade.ParsedTrades = nil
+		}
+		response["trade_sync"] = trade
+		if trade != nil && len(trade.PendingPDFs) > 0 {
+			response["trade_warning"] = trade.Message
+		}
+	}
+	cash, cashErr := c.service.Gmail.SyncCashMutationsContext(ctx, uid, broker)
+	if cashErr != nil {
+		response["cash_error"] = "Mutasi kas: " + cashErr.Error()
+	} else {
+		if summaryOnly && cash != nil {
+			cash.ParsedMutations = nil
+		}
+		response["cash_sync"] = cash
+	}
+	if tradeErr != nil && cashErr != nil {
+		return response, errs.GetStatusCode(tradeErr)
+	}
+	return response, http.StatusOK
 }
 
 // GetSyncStatus returns the current Gmail sync status for the authenticated user

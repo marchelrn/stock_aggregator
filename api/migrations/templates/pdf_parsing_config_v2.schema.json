@@ -77,7 +77,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["extraction", "fee_allocation", "sell_amount"],
       "properties": {
-        "extraction": {"enum": ["plain", "layout"]},
+        "extraction": {"enum": ["plain", "layout", "plain_then_layout"]},
         "ignore_patterns": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "Explicit RE2 patterns for repeated PDF page furniture, replaced with a newline before table parsing."},
 		"password_source": {"enum": ["broker"], "description": "Resolve the encrypted PDF password from the user's broker credential; never store passwords in template config."},
         "date_replacements": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},

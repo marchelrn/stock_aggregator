@@ -146,9 +146,6 @@ func (s *GmailScheduler) runOnce(at time.Time) {
 				log.Printf("Penjadwal sync Gmail: transaksi user %d gagal: %v", user.Id, err)
 			}
 		}
-		if user.LastGmailSyncAt != nil && at.Sub(*user.LastGmailSyncAt) < 30*time.Minute {
-			continue
-		}
 		if _, err := s.gmail.SyncCashMutations(user.Id); err != nil {
 			log.Printf("Penjadwal sync Gmail: mutasi kas user %d gagal: %v", user.Id, err)
 		}
