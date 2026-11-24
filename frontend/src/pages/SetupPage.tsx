@@ -1,3 +1,4 @@
+import TradePDFReviews from "../components/TradePDFReviews";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
@@ -239,6 +240,7 @@ export default function SetupPage() {
           <ThemeToggle />
         </div>
       </header>
+      <TradePDFReviews syncing={syncing || running} onSaved={() => { void loadDashboard({ silent: true }); }} />
       {!review && (
         <div className="grid min-w-0 min-[1000px]:min-h-[calc(100dvh_-_5rem)] min-[1000px]:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
           <section

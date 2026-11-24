@@ -5,10 +5,12 @@
 const env = String(import.meta.env.VITE_ENV || "").toUpperCase();
 const isDevelopment = env === "DEVELOPMENT";
 const localhostUrl = "http://localhost:3030";
-const renderUrl =
+const fallbackUrl =
   import.meta.env.VITE_API_URL || "https://stock-api-8ftf.onrender.com";
 
-const defaultUrl = isDevelopment ? localhostUrl : renderUrl;
+const defaultUrl =
+  import.meta.env.VITE_API_URL ||
+  (isDevelopment ? localhostUrl : fallbackUrl);
 let baseUrl = defaultUrl.replace(/\/$/, "");
 
 // Dikirim ke window saat server membalas 401 untuk request yang membawa token

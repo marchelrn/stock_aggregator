@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "react-toastify";
-import { api, getBaseUrl, getIsDevelopment } from "../lib/api";
+import { api, ApiError, getBaseUrl, getIsDevelopment } from "../lib/api";
 import { buildSummary, normalizeArray } from "../lib/portfolio";
 import type {
   Broker,
@@ -65,7 +65,7 @@ interface PortfolioContextValue {
     fullSync?: boolean,
   ) => Promise<GmailSyncResponse | null>;
   syncCashMutations: () => Promise<CashMutationsResponse | null>;
-  syncSetupHistorical: (brokerName: string) => Promise<SetupSyncResponse | null>;
+  syncSetupHistorical: (brokerName: string) => Promise<SetupSyncResponse>;
   loadCashMutations: () => Promise<CashMutationData[]>;
   getGmailSyncStatus: () => Promise<GmailSyncStatusResponse | null>;
   getCashBreakdown: (brokerId: number) => Promise<CashBreakdown | null>;
@@ -417,7 +417,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
             ? "Sinkronisasi penuh trade confirmation dari Gmail..."
             : "Menyinkronkan trade confirmation dari Gmail...",
         );
-        const path = fullSync ? "/api/gmail/sync?full=true" : "/api/gmail/sync";
+        const path = `/api/gmail/sync?full=${fullSync}&gemini=${allowGeminiForSync() ? 1 : 0}`;
         const res = await api<GmailSyncResponse>(path, { method: "POST" });
         const tradesSynced = res.TradesSynced ?? res.trades_synced ?? 0;
         const tradesFound = res.TradesFound ?? res.trades_found ?? 0;
@@ -465,21 +465,32 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       }
     }, [setStatus]);
 
-  // Sync historis sekali jalan setelah broker disimpan pada setup awal.
-  // Endpoint mengembalikan hasil transaksi dan mutasi kas secara terpisah.
-  const syncSetupHistorical =
-    useCallback(async (brokerName: string): Promise<SetupSyncResponse | null> => {
+  const syncSetupHistorical = useCallback(async (brokerName: string): Promise<SetupSyncResponse> => {
+    const path = "/api/gmail/setup-sync";
+    const start = await api<{ job_id: string } | SetupSyncResponse>(path + `?async=1&gemini=${allowGeminiForSync() ? 1 : 0}`, {
+      body: JSON.stringify({ broker_name: brokerName }),
+      method: "POST",
+    });
+    if (!("job_id" in start)) return start;
+
+    type Progress = { running: true } | { running: false; result: SetupSyncResponse };
+    let failures = 0;
+    for (;;) {
+      await new Promise(resolve => window.setTimeout(resolve, 3000));
+      let status: Progress;
       try {
-        const res = await api<SetupSyncResponse>("/api/gmail/setup-sync", {
-          body: JSON.stringify({ broker_name: brokerName }),
-          method: "POST",
-        });
-        return res;
-      } catch (error) {
-        setStatus((error as Error).message, true);
-        return null;
+        status = await api<Progress>(path + "/" + encodeURIComponent(start.job_id), { cache: "no-store" });
+        failures = 0;
+      } catch (err) {
+        if (++failures >= 4 || (err instanceof ApiError && err.status < 500)) throw err;
+        continue;
       }
-    }, [setStatus]);
+      if (!status.running) {
+        if (status.result.trade_warning) toast.warn(status.result.trade_warning, { autoClose: false });
+        return status.result;
+      }
+    }
+  }, []);
 
   const loadCashMutations = useCallback(async (): Promise<
     CashMutationData[]
@@ -596,4 +607,8 @@ export function usePortfolio(): PortfolioContextValue {
     throw new Error("usePortfolio must be used within a PortfolioProvider");
   }
   return ctx;
+}
+
+function allowGeminiForSync(): boolean {
+  return window.confirm("Izinkan Google Gemini membaca PDF konfirmasi transaksi yang gagal dibaca selama sinkronisasi ini? PDF lengkap dapat memuat nama dan nomor rekening. Transaksi yang lolos validasi akan disimpan otomatis. Pilih Batal untuk melanjutkan dengan parser lokal saja.");
 }

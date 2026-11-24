@@ -216,6 +216,7 @@ export interface GmailCashSyncResponse {
 
 /** Hasil sync historis saat setup: tiap tahap bisa berhasil atau gagal sendiri. */
 export interface SetupSyncResponse {
+  trade_warning?: string
   trade_sync?: GmailSyncResponse
   cash_sync?: GmailCashSyncResponse
   trade_error?: string
