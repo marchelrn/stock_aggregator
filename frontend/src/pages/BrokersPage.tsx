@@ -1,4 +1,3 @@
-import TradePDFReviews from "../components/TradePDFReviews";
 import { BROKERS, findBrokerOption } from '../lib/brokerOptions'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePortfolio } from '../context/PortfolioContext'
@@ -290,7 +289,6 @@ export default function BrokersPage() {
   return (
     <>
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-4">
-        <TradePDFReviews syncing={savingBroker} onSaved={() => { void loadDashboard({ silent: true }); }} />
         {/*<GmailConnection {...gmail} returnTo="/manage" />*/}
         <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
           <div className="flex items-center justify-between gap-2">

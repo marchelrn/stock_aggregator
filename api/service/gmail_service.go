@@ -1176,7 +1176,7 @@ func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailS
 					*reviewed++
 					return
 				}
-				pending = append(pending, dto.PendingTradePDF{Filename: part.Filename, Reason: "Periksa dokumen di bagian PDF perlu ditinjau."})
+				pending = append(pending, dto.PendingTradePDF{Filename: part.Filename, Reason: "Transaksi belum terbaca. Coba sinkronkan kembali."})
 			}
 			var previous *models.TradeReview
 			if len(known[digest]) > 0 && canReview {
@@ -1229,7 +1229,7 @@ func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailS
 							*reviewed += found
 							*recoveredCount += n
 						} else {
-							pending = append(pending, dto.PendingTradePDF{Filename: part.Filename, Reason: "Ekstraksi Gemini belum selesai atau hasil belum lolos validasi. Coba lagi atau tinjau PDF."})
+							pending = append(pending, dto.PendingTradePDF{Filename: part.Filename, Reason: "Transaksi belum dapat divalidasi. Coba sinkronkan kembali."})
 						}
 						return nil
 					}
