@@ -50,6 +50,7 @@ func getMigrations() []migration {
 		&stockbitFeeColumns{},
 		&tradeReviews{},
 		&ajaibAndRights{},
+		&retryReviewDrafts{},
 	}
 }
 
