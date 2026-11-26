@@ -155,17 +155,18 @@ func (s *GmailServiceImpl) convertParsedTradeToTransaction(user *models.Users, t
 	}
 
 	return &models.Transaction{
-		UserID:     user.Id,
-		Ticker:     trade.Ticker,
-		Price:      trade.Price,
-		Lot:        trade.Lot,
-		BrokerID:   brokerID,
-		BrokerName: trade.BrokerName,
-		Type:       models.Type(trade.Type),
-		Date:       trade.Date,
-		AmountDone: amountDone,
-		Tax:        trade.Tax,
-		RefNo:      trade.RefNo,
+		UserID:      user.Id,
+		Ticker:      trade.Ticker,
+		Price:       trade.Price,
+		Lot:         trade.Lot,
+		BrokerID:    brokerID,
+		BrokerName:  trade.BrokerName,
+		Type:        models.Type(trade.Type),
+		Date:        trade.Date,
+		EmailSentAt: trade.EmailSentAt,
+		AmountDone:  amountDone,
+		Tax:         trade.Tax,
+		RefNo:       trade.RefNo,
 	}
 }
 
@@ -341,7 +342,11 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 	}
 	ctx = withAjaibDebugCapture(ctx, user.Id, selected)
 	names := parser.BrokerScope(ctx)
-	cacheScope := gmailCacheScope(tradeConfirmationCacheType, names)
+	cacheType := tradeConfirmationCacheType
+	if names[strings.ToLower(ajaibBroker)] > 0 {
+		cacheType += ":ajaib-email-date"
+	}
+	cacheScope := gmailCacheScope(cacheType, names)
 	if names != nil && len(names) == 0 {
 		return &dto.GmailSyncResponse{StatusCode: http.StatusOK}, nil
 	}
@@ -1181,6 +1186,7 @@ func (s *GmailServiceImpl) processSyncAttachments(ctx context.Context, gmailSrv 
 		return nil, nil, fmt.Errorf("Gmail message has no MIME payload")
 	}
 	emailDate := extractMessageDate(msg)
+	emailSentAt := emailDate.UTC()
 	meta := parser.EmailMetadata{}
 	for _, header := range msg.Payload.Headers {
 		if header == nil {
@@ -1273,12 +1279,18 @@ func (s *GmailServiceImpl) processSyncAttachments(ctx context.Context, gmailSrv 
 					return nil
 				}
 			}
-			hold := func(row models.TradeReview) {
+			hold := func(row models.TradeReview) error {
 				if row.State == "saved" {
+					if strings.EqualFold(row.BrokerName, ajaibBroker) && !emailSentAt.IsZero() {
+						if err := s.Reviews.RecordEmailSentAt(ctx, uid, row.ID, emailSentAt); err != nil {
+							return err
+						}
+					}
 					*reviewed++
-					return
+					return nil
 				}
 				pending = append(pending, dto.PendingTradePDF{Filename: part.Filename, Reason: "Transaksi belum terbaca. Coba sinkronkan kembali."})
+				return nil
 			}
 			var previous *models.TradeReview
 			if reviewBroker != "" {
@@ -1288,8 +1300,7 @@ func (s *GmailServiceImpl) processSyncAttachments(ctx context.Context, gmailSrv 
 							previous = &row
 							break
 						}
-						hold(row)
-						return nil
+						return hold(row)
 					}
 				}
 			}
@@ -1307,8 +1318,7 @@ func (s *GmailServiceImpl) processSyncAttachments(ctx context.Context, gmailSrv 
 				return ctx.Err()
 			}
 			if previous != nil && err != nil && (!(localPDFEnabled() || geminiSyncEnabled(ctx)) || errors.Is(err, parser.ErrEmailNotApplicable)) {
-				hold(*previous)
-				return nil
+				return hold(*previous)
 			}
 			if err == nil && marketAware && len(parsed) > 0 {
 				broker := parsed[0].BrokerName
@@ -1345,7 +1355,7 @@ func (s *GmailServiceImpl) processSyncAttachments(ctx context.Context, gmailSrv 
 							pending = append(pending, failed)
 							return nil
 						}
-						n, found, fallbackErr := s.syncFallbackPDF(ctx, uid, row.ID, pdfBytes, row.BrokerName)
+						n, found, fallbackErr := s.syncFallbackPDF(ctx, uid, row.ID, pdfBytes, row.BrokerName, emailSentAt)
 						if fallbackErr == nil {
 							row.State = "saved"
 							*reviewed += found
@@ -1360,8 +1370,7 @@ func (s *GmailServiceImpl) processSyncAttachments(ctx context.Context, gmailSrv 
 						return nil
 					}
 					known[digest] = append(known[digest], *row)
-					hold(*row)
-					return nil
+					return hold(*row)
 				}
 			}
 			switch {
@@ -1377,7 +1386,11 @@ func (s *GmailServiceImpl) processSyncAttachments(ctx context.Context, gmailSrv 
 			default:
 				if !emailDate.IsZero() {
 					for i := range parsed {
-						if parsed[i].BrokerName != "Ajaib Sekuritas" || parsed[i].Date.IsZero() {
+						isAjaib := strings.EqualFold(parsed[i].BrokerName, ajaibBroker)
+						if isAjaib {
+							parsed[i].EmailSentAt = &emailSentAt
+						}
+						if !isAjaib || parsed[i].Date.IsZero() {
 							parsed[i].Date = emailDate
 						}
 					}

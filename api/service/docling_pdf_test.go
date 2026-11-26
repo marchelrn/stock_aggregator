@@ -78,6 +78,7 @@ func testDoclingTransaction(t *testing.T, db *gorm.DB, path string, valid, gmail
 	}
 	var review *models.TradeReview
 	var saved, found int
+	sentAt := time.Date(2026, 10, 18, 13, 14, 15, 0, time.UTC)
 	if gmailPath {
 		services, initErr := New(repository)
 		if initErr != nil {
@@ -85,7 +86,7 @@ func testDoclingTransaction(t *testing.T, db *gorm.DB, path string, valid, gmail
 		}
 		svc := services.Gmail.(*GmailServiceImpl)
 		ctx := parser.WithBrokerScope(t.Context(), map[string]int{"ajaib sekuritas": broker.ID})
-		msg := &gmail.Message{Id: "docling-test-mail", Payload: &gmail.MessagePart{
+		msg := &gmail.Message{Id: "docling-test-mail", InternalDate: sentAt.UnixMilli(), Payload: &gmail.MessagePart{
 			Filename: "/home/lerch/Downloads/TC_20240912_O0CP1B.pdf", PartId: "1", MimeType: "application/pdf", Body: &gmail.MessagePartBody{Data: base64.RawURLEncoding.EncodeToString(pdf)},
 			Headers: []*gmail.MessagePartHeader{{Name: "From", Value: "noreply@ajaib.co.id"}, {Name: "Subject", Value: "Rangkuman Transaksi Harian"}},
 		}}
@@ -105,7 +106,7 @@ func testDoclingTransaction(t *testing.T, db *gorm.DB, path string, valid, gmail
 		if err != nil {
 			t.Fatal(err)
 		}
-		saved, found, err = svc.syncFallbackPDF(t.Context(), user.Id, review.ID, pdf, broker.Name)
+		saved, found, err = svc.syncFallbackPDF(t.Context(), user.Id, review.ID, pdf, broker.Name, sentAt)
 	}
 
 	if !valid {
@@ -133,6 +134,18 @@ func testDoclingTransaction(t *testing.T, db *gorm.DB, path string, valid, gmail
 		t.Fatalf("expected one saved trade, got %d", len(rows))
 	}
 	row := rows[0]
+	if row.EmailSentAt == nil || !row.EmailSentAt.Equal(sentAt) {
+		t.Fatal("Gmail timestamp not stored with fallback transaction")
+	}
+	if err := tx.Model(&row).Update("email_sent_at", nil).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Reviews.RecordEmailSentAt(t.Context(), user.Id, review.ID, sentAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.First(&row, row.Id).Error; err != nil || row.EmailSentAt == nil || !row.EmailSentAt.Equal(sentAt) {
+		t.Fatal("existing fallback transaction timestamp was not recovered", err)
+	}
 	ticker, side, date := "HRTA", models.TypeSell, "2026-10-16"
 	lot, price, fee, net := 28, 1615.0, 11363.0, 4510637.0
 	if legacyBuy {

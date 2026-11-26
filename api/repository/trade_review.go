@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/marchelrn/stock_api/models"
 	errs "github.com/marchelrn/stock_api/pkg/error"
@@ -45,6 +46,15 @@ func (r *TradeReviewRepository) Get(ctx context.Context, uid, id uint) (*models.
 	}
 	return &row, err
 }
+func (r *TradeReviewRepository) RecordEmailSentAt(ctx context.Context, uid, id uint, sentAt time.Time) error {
+	return r.db.WithContext(ctx).Exec(`UPDATE transactions AS t SET email_sent_at = ?
+		FROM trade_reviews AS r
+		WHERE r.user_id = ? AND r.id = ? AND r.state = 'saved'
+		  AND t.user_id = r.user_id AND t.broker_id = r.broker_id
+		  AND r.imported_ids @> jsonb_build_array(t.id)
+		  AND (t.email_sent_at IS NULL OR t.email_sent_at > ?)`, sentAt, uid, id, sentAt).Error
+}
+
 func (r *TradeReviewRepository) BeginExtraction(ctx context.Context, uid, id uint, source, lease string) error {
 	q := r.db.WithContext(ctx).Exec(`UPDATE trade_reviews SET consented_at=now(), consent_source=?, extraction_lease=?
  WHERE user_id=? AND id=? AND state='pending' AND (extraction_lease IS NULL OR consented_at < now()-interval '2 minutes')`, source, lease, uid, id)

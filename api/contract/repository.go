@@ -16,6 +16,7 @@ type TradeReviewRepository interface {
 	EndExtraction(context.Context, uint, uint, string) error
 	Draft(context.Context, uint, uint, string, string) error
 	Save(context.Context, uint, uint, string, []*models.Transaction) (int, error)
+	RecordEmailSentAt(context.Context, uint, uint, time.Time) error
 }
 
 type RightExerciseRepository interface {

@@ -201,7 +201,7 @@ func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.
 }
 
 // History dates are WITA wall times in PostgreSQL's timestamp-without-zone column.
-const transactionHistoryColumns = "id, user_id, ticker, price, lot, stock_id, broker_id, broker_name, type, date AT TIME ZONE 'Asia/Makassar' AS date, amount_done, tax, ref_no"
+const transactionHistoryColumns = "id, user_id, ticker, price, lot, stock_id, broker_id, broker_name, type, date AT TIME ZONE 'Asia/Makassar' AS date, amount_done, tax, ref_no, email_sent_at"
 
 func (r *TransactionRepository) GetTransactions(userID uint, id int) ([]models.Transaction, error) {
 	var transactions []models.Transaction
@@ -439,6 +439,11 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 					err := query.First(&existing).Error
 					if err == nil {
 						trade.Id = existing.Id
+						if trade.EmailSentAt != nil && (existing.EmailSentAt == nil || trade.EmailSentAt.Before(*existing.EmailSentAt)) {
+							if err := tx.Model(&existing).Update("email_sent_at", trade.EmailSentAt).Error; err != nil {
+								return err
+							}
+						}
 						// Keep a duplicate on its original side of the cash boundary.
 						if (existing.Date.Hour() == 0 && existing.Date.Minute() == 0 && existing.Date.Second() == 0) &&
 							!(trade.Date.Hour() == 0 && trade.Date.Minute() == 0 && trade.Date.Second() == 0) &&

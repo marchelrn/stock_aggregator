@@ -180,7 +180,7 @@ func geminiSyncEnabled(ctx context.Context) bool {
 	return enabled
 }
 
-func (s *GmailServiceImpl) syncFallbackPDF(parent context.Context, uid, id uint, pdf []byte, broker string) (int, int, error) {
+func (s *GmailServiceImpl) syncFallbackPDF(parent context.Context, uid, id uint, pdf []byte, broker string, emailSentAt time.Time) (int, int, error) {
 	var key, model string
 	source := "sync:ollama:application/pdf"
 	if doclingEnabled(broker) {
@@ -217,6 +217,11 @@ func (s *GmailServiceImpl) syncFallbackPDF(parent context.Context, uid, id uint,
 	}
 	if err != nil {
 		return 0, 0, err
+	}
+	if broker == ajaibBroker && !emailSentAt.IsZero() {
+		for _, trade := range trades {
+			trade.EmailSentAt = &emailSentAt
+		}
 	}
 	count, err := s.Reviews.Save(ctx, uid, id, "pending", trades)
 	if err != nil {

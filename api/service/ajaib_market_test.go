@@ -155,6 +155,7 @@ func TestAjaibHistoricalDomainDiscovery(t *testing.T) {
 		}
 	}
 
+	sentAt := time.Date(2026, 10, 18, 21, 14, 15, 0, time.FixedZone("WITA", 8*3600))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/messages") {
 			q := r.URL.Query().Get("q")
@@ -183,6 +184,7 @@ func TestAjaibHistoricalDomainDiscovery(t *testing.T) {
 			Headers: []*gmail.MessagePartHeader{
 				{Name: "From", Value: "Ajaib Statements <statements@ajaib.co.id>"},
 				{Name: "Subject", Value: subject},
+				{Name: "Date", Value: sentAt.Format(time.RFC1123Z)},
 			},
 		}})
 	}))
@@ -198,6 +200,11 @@ func TestAjaibHistoricalDomainDiscovery(t *testing.T) {
 	var rows []models.Transaction
 	if err := tx.Where("user_id=? AND broker_id=?", user.Id, broker.ID).Order("id").Find(&rows).Error; err != nil || len(rows) != expectedCount || rows[0].Ticker != ticker || rows[0].Date.Format("2006-01-02") != tradeDate || rows[0].Type != tradeType || rows[0].Lot != lot || rows[0].Price != price || rows[0].AmountDone != net {
 		t.Fatal("domestic TC not stored correctly", err)
+	}
+	for _, row := range rows {
+		if row.EmailSentAt == nil || !row.EmailSentAt.Equal(sentAt) {
+			t.Fatal("Gmail Date header not stored independently of trade date")
+		}
 	}
 	if secondPage {
 		sale := rows[1]

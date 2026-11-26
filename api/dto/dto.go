@@ -220,15 +220,16 @@ type BasicResponse struct {
 // Gmail Sync Struct
 
 type ParsedTrade struct {
-	Ticker     string    `json:"ticker"`
-	Lot        int       `json:"lot"`
-	Price      float64   `json:"price"`
-	Type       string    `json:"type"` // BUY or SELL
-	Date       time.Time `json:"date"`
-	BrokerName string    `json:"broker_name"`
-	AmountDone float64   `json:"amount_done"`
-	Tax        float64   `json:"tax"`
-	RefNo      string    `json:"ref_no,omitempty"`
+	EmailSentAt *time.Time `json:"email_sent_at,omitempty"`
+	Ticker      string     `json:"ticker"`
+	Lot         int        `json:"lot"`
+	Price       float64    `json:"price"`
+	Type        string     `json:"type"` // BUY or SELL
+	Date        time.Time  `json:"date"`
+	BrokerName  string     `json:"broker_name"`
+	AmountDone  float64    `json:"amount_done"`
+	Tax         float64    `json:"tax"`
+	RefNo       string     `json:"ref_no,omitempty"`
 }
 
 type PendingTradePDF struct {

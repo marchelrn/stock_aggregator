@@ -56,6 +56,7 @@ func getMigrations() []migration {
 		&ajaibOptionalPDFTitle{},
 		&ajaibTradePages{},
 		&ajaibTCAttachmentNames{},
+		&addTradeEmailSentAt{},
 	}
 }
 
