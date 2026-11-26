@@ -13,6 +13,7 @@ import DashboardPage from "./pages/DashboardPage";
 import BrokersPage from "./pages/BrokersPage";
 import MarketPage from "./pages/MarketPage";
 import LoginPage from "./pages/LoginPage";
+import BrokerListPage from "./pages/BrokerListPage";
 import ThemeToggle from "./components/ThemeToggle";
 import NotFoundPage from "./pages/NotFoundPage";
 import AuthCallback from "./pages/AuthCallback";
@@ -199,6 +200,7 @@ export default function App() {
           }
         >
           <Route path="/login" element={<LoginRoute />} />
+          <Route path="/brokerlist" element={<BrokerListPage />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route
             path="/auth/gmail/callback"

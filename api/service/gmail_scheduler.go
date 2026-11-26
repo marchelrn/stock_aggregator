@@ -32,7 +32,7 @@ type GmailScheduler struct {
 //
 //	GMAIL_CRON_ENABLED     (default true)
 //	GMAIL_CRON_START_HOUR  (default 0, WITA)
-//	GMAIL_CRON_END_HOUR    (default 23, WITA)
+//	GMAIL_CRON_END_HOUR    (default 23, WITA
 func NewGmailScheduler(gmail contract.GmailService, auth contract.AuthRepository) *GmailScheduler {
 	loc, err := time.LoadLocation("Asia/Makassar")
 	if err != nil {
@@ -73,7 +73,7 @@ func (s *GmailScheduler) Start() {
 		log.Println("Penjadwal sync Gmail dimatikan (GMAIL_CRON_ENABLED=false)")
 		return
 	}
-	log.Printf("Penjadwal Gmail: tick berikut %s; trade confirmation tiap jam 17:00–23:00 WITA pada hari bursa", nextGmailHour(time.Now().In(s.loc)).Format(time.RFC3339))
+	log.Printf("Penjadwal Gmail: ticker berikut %s; trade confirmation tiap jam 17:00–23:00 WITA pada hari bursa", nextGmailHour(time.Now().In(s.loc)).Format(time.RFC3339))
 	go s.loop(context.Background())
 }
 
@@ -151,4 +151,5 @@ func (s *GmailScheduler) runOnce(at time.Time) {
 		}
 	}
 	log.Println("Penjadwal sync Gmail: putaran selesai")
+	log.Printf("Penjadwal sync Gmail: ticker berikut %s", nextGmailHour(time.Now().In(s.loc)).Format(time.RFC3339))
 }

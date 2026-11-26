@@ -49,6 +49,14 @@ func getMigrations() []migration {
 		&stockbitTableHeaders{},
 		&stockbitFeeColumns{},
 		&tradeReviews{},
+		&ajaibAndRights{},
+		&retryReviewDrafts{},
+		&verifyGmailCacheRows{},
+		&ajaibSenderDomain{},
+		&ajaibOptionalPDFTitle{},
+		&ajaibTradePages{},
+		&ajaibTCAttachmentNames{},
+		&addTradeEmailSentAt{},
 	}
 }
 

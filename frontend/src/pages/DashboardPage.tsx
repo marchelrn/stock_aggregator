@@ -12,6 +12,14 @@ export default function DashboardPage() {
   const [showPriceInfo, setShowPriceInfo] = useState(false)
   const priceInfoRef = useRef<HTMLDivElement>(null)
   const [syncingSectors, setSyncingSectors] = useState(false)
+  const [isEditingTicker, setIsEditingTicker] = useState(false)
+  const [hasTickerEdits, setHasTickerEdits] = useState(false)
+  const [tickerResetKey, setTickerResetKey] = useState(0)
+
+  const handleResetTicker = () => {
+    setTickerResetKey((k) => k + 1)
+    setHasTickerEdits(false)
+  }
 
   useEffect(() => {
     loadDashboard()
@@ -133,8 +141,36 @@ export default function DashboardPage() {
       <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-xl font-semibold">Ticker Breakdown</h2>
+          <div className="flex items-center gap-2">
+            {isEditingTicker && hasTickerEdits && (
+              <button
+                type="button"
+                onClick={handleResetTicker}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-slate-400"
+              >
+                Reset
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setIsEditingTicker((prev) => !prev)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition focus-visible:ring-2 focus-visible:ring-teal-500 ${
+                isEditingTicker
+                  ? 'bg-teal-700 text-white hover:bg-teal-800'
+                  : 'border border-teal-600 bg-teal-50 text-teal-800 hover:bg-teal-100'
+              }`}
+            >
+              {isEditingTicker ? 'Selesai' : 'Edit'}
+            </button>
+          </div>
         </div>
-        <TickerTable prices={state.stockPrices} summary={state.summary} />
+        <TickerTable
+          prices={state.stockPrices}
+          summary={state.summary}
+          isEditing={isEditingTicker}
+          resetKey={tickerResetKey}
+          onHasEditsChange={setHasTickerEdits}
+        />
       </section>
     </div>
   )

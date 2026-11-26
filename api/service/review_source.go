@@ -180,30 +180,80 @@ func geminiSyncEnabled(ctx context.Context) bool {
 	return enabled
 }
 
-func (s *GmailServiceImpl) syncGeminiPDF(parent context.Context, uid, id uint, pdf []byte) (int, int, error) {
-	key, model, err := geminiConfig()
-	if err != nil {
-		return 0, 0, err
+func (s *GmailServiceImpl) syncFallbackPDF(parent context.Context, uid, id uint, pdf []byte, broker string, emailSentAt time.Time) (int, int, error) {
+	var key, model string
+	source := "sync:ollama:application/pdf"
+	if doclingEnabled(broker) {
+		source = "sync:docling:application/pdf"
+	} else if !localPDFEnabled() {
+		var err error
+		key, model, err = geminiConfig()
+		if err != nil {
+			return 0, 0, err
+		}
+		source = "sync:application/pdf"
 	}
 	ctx, cancel := context.WithTimeout(parent, reviewExtractionTimeout)
 	defer cancel()
 	lease := rand.Text()
-	if err := s.Reviews.BeginExtraction(ctx, uid, id, "sync:application/pdf", lease); err != nil {
-		return 0, 0, err
+	if err := s.Reviews.BeginExtraction(ctx, uid, id, source, lease); err != nil {
+		return 0, 0, fmt.Errorf("Ekstraksi belum dapat dimulai. Coba lagi.")
 	}
 	defer func() {
 		release, done := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer done()
 		_ = s.Reviews.EndExtraction(release, uid, id, lease)
 	}()
-	draft, err := extractGemini(ctx, geminiClient, key, model, "application/pdf", pdf)
+	var trades []*models.Transaction
+	var err error
+	if doclingEnabled(broker) {
+		var draft *dto.TradeDraft
+		draft, err = extractDoclingAjaib(ctx, pdf)
+		if err == nil {
+			trades, err = validateTradeDraft(*draft)
+		}
+	} else {
+		trades, err = extractValidatedWithProvider(ctx, key, model, pdf, localPDFEnabled(), broker)
+	}
 	if err != nil {
 		return 0, 0, err
 	}
-	trades, err := validateTradeDraft(*draft)
-	if err != nil {
-		return 0, 0, err
+	if broker == ajaibBroker && !emailSentAt.IsZero() {
+		for _, trade := range trades {
+			trade.EmailSentAt = &emailSentAt
+		}
 	}
 	count, err := s.Reviews.Save(ctx, uid, id, "pending", trades)
-	return count, len(trades), err
+	if err != nil {
+		return 0, 0, fmt.Errorf("Transaksi tervalidasi tetapi gagal disimpan.")
+	}
+	return count, len(trades), nil
+}
+
+func extractValidatedPDF(ctx context.Context, key, model string, pdf []byte) ([]*models.Transaction, error) {
+	return extractValidatedWithProvider(ctx, key, model, pdf, false, "")
+}
+func extractValidatedWithProvider(ctx context.Context, key, model string, pdf []byte, local bool, broker string) ([]*models.Transaction, error) {
+	var reason string
+	for attempt := 0; attempt < 2; attempt++ {
+		var draft *dto.TradeDraft
+		var err error
+		if local {
+			draft, err = extractLocalPDF(ctx, pdf, reason, broker)
+		} else {
+			draft, err = extractGemini(ctx, geminiClient, key, model, "application/pdf", pdf, reason)
+		}
+		if err != nil {
+			return nil, err
+		}
+		trades, err := validateTradeDraft(*draft)
+		if err == nil {
+			return trades, nil
+		}
+		if attempt == 1 || ctx.Err() != nil {
+			return nil, err
+		}
+		reason = "Read the original document again. Correct only using printed evidence. Validation: " + err.Error()
+	}
+	return nil, errors.New("Hasil ekstraksi belum valid.")
 }

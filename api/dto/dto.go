@@ -220,23 +220,28 @@ type BasicResponse struct {
 // Gmail Sync Struct
 
 type ParsedTrade struct {
-	Ticker     string    `json:"ticker"`
-	Lot        int       `json:"lot"`
-	Price      float64   `json:"price"`
-	Type       string    `json:"type"` // BUY or SELL
-	Date       time.Time `json:"date"`
-	BrokerName string    `json:"broker_name"`
-	AmountDone float64   `json:"amount_done"`
-	Tax        float64   `json:"tax"`
-	RefNo      string    `json:"ref_no,omitempty"`
+	EmailSentAt *time.Time `json:"email_sent_at,omitempty"`
+	Ticker      string     `json:"ticker"`
+	Lot         int        `json:"lot"`
+	Price       float64    `json:"price"`
+	Type        string     `json:"type"` // BUY or SELL
+	Date        time.Time  `json:"date"`
+	BrokerName  string     `json:"broker_name"`
+	AmountDone  float64    `json:"amount_done"`
+	Tax         float64    `json:"tax"`
+	RefNo       string     `json:"ref_no,omitempty"`
 }
 
 type PendingTradePDF struct {
+	ReviewID uint   `json:"-"`
 	Filename string `json:"filename"`
 	Reason   string `json:"reason"`
 }
 
 type GmailSyncResponse struct {
+	EmailsFound  int               `json:"emails_found"`
+	EmailsCached int               `json:"emails_cached"`
+	PDFsExcluded int               `json:"pdfs_excluded"`
 	PendingPDFs  []PendingTradePDF `json:"pending_pdfs,omitempty"`
 	StatusCode   int               `json:"status_code"`
 	Message      string            `json:"message"`

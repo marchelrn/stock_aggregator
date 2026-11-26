@@ -50,8 +50,28 @@ func validateTradeDraft(d dto.TradeDraft) ([]*models.Transaction, error) {
 	seen := map[string]bool{}
 	trades := make([]*models.Transaction, 0, len(d.Rows))
 	for i, r := range d.Rows {
-		if !reviewTicker.MatchString(r.Ticker) || (r.Side != "BUY" && r.Side != "SELL") || (r.Ref != "" && !reviewRef.MatchString(r.Ref)) {
-			return nil, fmt.Errorf("Periksa kode saham, referensi, dan sisi transaksi pada baris %d.", i+1)
+		r.Ticker = strings.ToUpper(strings.TrimSpace(r.Ticker))
+		r.Ref = strings.TrimSpace(r.Ref)
+		r.Side = strings.ToUpper(strings.TrimSpace(r.Side))
+		switch r.Side {
+		case "BELI":
+			r.Side = "BUY"
+		case "JUAL":
+			r.Side = "SELL"
+		}
+		if !reviewTicker.MatchString(r.Ticker) {
+			return nil, fmt.Errorf("Baris %d: kode saham belum valid.", i+1)
+		}
+		if r.Side != "BUY" && r.Side != "SELL" {
+			return nil, fmt.Errorf("Baris %d: sisi beli atau jual belum terbaca.", i+1)
+		}
+		if r.Ref != "" && !reviewRef.MatchString(r.Ref) {
+			return nil, fmt.Errorf("Baris %d: format referensi belum valid.", i+1)
+		}
+		if r.Lots == "" {
+			if shares, err := whole(r.Shares); err == nil && shares%100 == 0 {
+				r.Lots = strconv.FormatInt(shares/100, 10)
+			}
 		}
 		lots, e1 := whole(r.Lots)
 		shares, e2 := whole(r.Shares)

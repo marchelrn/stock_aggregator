@@ -61,10 +61,13 @@ func TestGmailCashHistoryAndCheckpoint(t *testing.T) {
 	rows := map[string]*gmail.Message{
 		"dep":  mail("Deposit Kamu Sudah Masuk", "Deposit sebesar Rp 100", old),
 		"wd":   mail("Penarikan Dana Berhasil", "Jumlah : IDR 50 Nomor Referensi : WD01", old),
-		"div":  mail("Pembagian dividen tunai BBRI", "Dividen Bersih 25", old),
+		"div":  mail("Pembagian dividen tunai BBRI", "Dividen Bersih Rp 25", old),
 		"same": mail("Deposit Kamu Sudah Masuk", "Deposit sebesar Rp 100", old.Add(time.Second)),
 	}
-	order := []string{"dep", "wd", "div", "same"}
+	rows["foreign-div"] = mail("Pembagian dividen tunai AAPL", "Dividen Bersih 25 USD", old)
+	rows["foreign-wd"] = mail("Penarikan Dana Berhasil", "Jumlah : 50 USD Nomor Referensi : US01", old)
+	rows["crypto-dep"] = mail("Deposit Kamu Sudah Masuk", "Deposit sebesar Rp 100. Produk: kripto", old)
+	order := []string{"dep", "foreign-wd", "wd", "div", "foreign-div", "crypto-dep", "same"}
 	failSearch := false
 	var queries []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -124,4 +127,74 @@ func TestGmailCashHistoryAndCheckpoint(t *testing.T) {
 	if !before.LastCashSyncAt.Equal(*after.LastCashSyncAt) {
 		t.Fatal("failed search advanced checkpoint")
 	}
+}
+
+func TestGmailCacheRequiresEveryStoredRow(t *testing.T) {
+	dsn := os.Getenv("GMAIL_HISTORY_TEST_DSN")
+	if dsn == "" {
+		t.Skip("requires a disposable PostgreSQL database")
+	}
+	db, err := gorm.Open(postgres.Open(dsn))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	config.Load()
+	migrations.Up(sqlDB)
+	tx := db.Begin()
+	defer tx.Rollback()
+	r := repository.New(tx)
+	user := models.Users{Email: "gmail-verified-cache@example.test", CreatedAt: time.Now()}
+	if err := tx.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	broker, err := r.Brokers.AddBrokerData(&models.Broker{UserID: user.Id, Name: "Ajaib Sekuritas"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := []*models.Transaction{
+		{BrokerID: broker.ID, BrokerName: broker.Name, Ticker: "HRTA", Type: "BUY", Date: time.Now().Add(-time.Hour), Lot: 1, Price: 1600, RefNo: "test1"},
+		{BrokerID: broker.ID, BrokerName: broker.Name, Ticker: "HRTA", Type: "BUY", Date: time.Now().Add(-time.Hour), Lot: 2, Price: 1600, RefNo: "test2"},
+	}
+	review, err := r.Reviews.Remember(t.Context(), &models.TradeReview{UserID: user.Id, BrokerID: broker.ID, BrokerName: broker.Name, MessageID: "pdf", Digest: "verify", State: "pending"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := r.Reviews.Save(t.Context(), user.Id, review.ID, "pending", batch); err != nil || count != 2 {
+		t.Fatalf("save=%d err=%v", count, err)
+	}
+	cache := repository.ImplGmailCacheRepository(tx)
+	scope := gmailCacheScope(tradeConfirmationCacheType, map[string]int{broker.Name: broker.ID})
+	if err := cache.MarkVerified(t.Context(), user.Id, "pdf", scope, 2, []int{batch[0].Id, batch[1].Id}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.MarkProcessed(t.Context(), user.Id, "legacy", scope, 2); err != nil {
+		t.Fatal(err)
+	}
+	assertCache := func(want bool) {
+		ids, err := cache.GetProcessedMessageIDs(t.Context(), user.Id, scope)
+		if err != nil || ids["pdf"] != want || ids["legacy"] {
+			t.Fatalf("eligible cache=%v, err=%v", ids, err)
+		}
+	}
+	assertCache(true)
+	if err := r.Transactions.DeleteTransaction(user.Id, batch[1].Id); err != nil {
+		t.Fatal(err)
+	}
+	assertCache(false)
+	pending, err := r.Reviews.List(t.Context(), user.Id, false)
+	if err != nil || len(pending) != 1 || pending[0].State != "pending" {
+		t.Fatalf("review did not reopen: %v", err)
+	}
+	if count, err := r.Reviews.Save(t.Context(), user.Id, review.ID, "pending", batch); err != nil || count != 1 {
+		t.Fatalf("restored=%d err=%v", count, err)
+	}
+	if err := cache.MarkVerified(t.Context(), user.Id, "pdf", scope, 2, []int{batch[0].Id, batch[1].Id}); err != nil {
+		t.Fatal(err)
+	}
+	assertCache(true)
 }

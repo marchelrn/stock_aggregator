@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -36,8 +37,9 @@ type retryTradeRepo struct {
 func (r *retryTradeRepo) SyncTradeConfirmationBatch(_ uint, rows []*models.Transaction) (int, error) {
 	n := 0
 	for _, v := range rows {
-		if !r.refs[v.RefNo] {
-			r.refs[v.RefNo] = true
+		key := fmt.Sprintf("%d:%s", v.BrokerID, v.RefNo)
+		if !r.refs[key] {
+			r.refs[key] = true
 			n++
 		}
 	}
@@ -104,5 +106,71 @@ func TestUnknownTradePDFKeepsOtherTradesAndRetries(t *testing.T) {
 	p.recovered = true
 	if res = run(); res.TradesSynced != 1 || len(res.PendingPDFs) != 0 || user.LastGmailSyncAt == nil || !cache.cached["mixed"] || len(repo.refs) != 3 {
 		t.Fatalf("repaired import: %+v", res)
+	}
+}
+
+type brokerScopedRetryParser struct{ retryTradeParser }
+
+func (p *brokerScopedRetryParser) EmailSelectors(context.Context) ([]parser.EmailMetadata, error) {
+	return []parser.EmailMetadata{{From: "no-reply@stockbit.com", Subject: "Trade Confirmation"}}, nil
+}
+
+type reconnectBrokerRepo struct {
+	contract.BrokerRepository
+	broker models.Broker
+}
+
+func (r *reconnectBrokerRepo) GetAllBrokers(_ uint) ([]models.Broker, error) {
+	return []models.Broker{r.broker}, nil
+}
+
+type scopedRetryCache struct {
+	contract.GmailCacheRepository
+	messages map[string]map[string]bool
+}
+
+func (c *scopedRetryCache) GetProcessedMessageIDs(_ context.Context, _ uint, kind string) (map[string]bool, error) {
+	return c.messages[kind], nil
+}
+
+func (c *scopedRetryCache) MarkProcessed(_ context.Context, _ uint, id, kind string, _ int) error {
+	if c.messages[kind] == nil {
+		c.messages[kind] = make(map[string]bool)
+	}
+	c.messages[kind][id] = true
+	return nil
+}
+
+func TestTradeSyncImportsHistoryForReconnectedBroker(t *testing.T) {
+	const messageID = "history"
+	fetched := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/messages") {
+			json.NewEncoder(w).Encode(gmail.ListMessagesResponse{Messages: []*gmail.Message{{Id: messageID}}})
+			return
+		}
+		fetched++
+		attachment := &gmail.MessagePart{Filename: "tc.pdf", MimeType: "application/pdf", Body: &gmail.MessagePartBody{Data: base64.RawURLEncoding.EncodeToString([]byte("fill"))}}
+		json.NewEncoder(w).Encode(gmail.Message{Id: messageID, InternalDate: 1760000000000, Payload: attachment})
+	}))
+	defer server.Close()
+	client, err := gmail.NewService(t.Context(), option.WithEndpoint(server.URL+"/"), option.WithHTTPClient(server.Client()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	brokers := &reconnectBrokerRepo{broker: models.Broker{ID: 29, Name: "Stockbit Sekuritas"}}
+	cache := &scopedRetryCache{messages: map[string]map[string]bool{"trade_confirmation:v3": {messageID: true}}}
+	trades := &retryTradeRepo{refs: map[string]bool{}}
+	s := GmailServiceImpl{TradeParser: &brokerScopedRetryParser{}, BrokerRepo: brokers, TransactionRepo: trades, GmailCacheRepo: cache}
+	for _, step := range []struct{ id, saved, fetched int }{{29, 1, 1}, {29, 0, 1}, {30, 1, 2}, {30, 0, 2}} {
+		brokers.broker.ID = step.id
+		result, err := s.syncTradeConfirmationsWithDate(t.Context(), client, &models.Users{Id: 11}, time.Now(), nil, brokers.broker.Name)
+		if err != nil || result.TradesSynced != step.saved || fetched != step.fetched {
+			t.Fatalf("broker %d: result=%+v fetched=%d err=%v", step.id, result, fetched, err)
+		}
+	}
+	if !trades.refs["30:fill"] {
+		t.Fatal("history was not saved to new broker")
 	}
 }

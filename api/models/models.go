@@ -83,20 +83,21 @@ type CashMutation struct {
 // Transactions
 
 type Transaction struct {
-	ReviewedFee bool      `json:"-" gorm:"column:reviewed_fee"`
-	Id          int       `json:"transaction_id"`
-	UserID      uint      `json:"user_id" gorm:"column:user_id;index"`
-	Ticker      string    `json:"ticker"`
-	Price       float64   `json:"price"`
-	Lot         int       `json:"lot"`
-	StockID     int       `json:"stock_id"`
-	BrokerID    int       `json:"broker_id"`
-	BrokerName  string    `json:"broker_name"`
-	Type        Type      `json:"type" gorm:"type:enum('BUY', 'SELL')"`
-	Date        time.Time `json:"date"`
-	AmountDone  float64   `json:"amount_done"`
-	Tax         float64   `json:"tax"`
-	RefNo       string    `json:"ref_no,omitempty" gorm:"column:ref_no"`
+	EmailSentAt *time.Time `json:"email_sent_at,omitempty" gorm:"column:email_sent_at"`
+	ReviewedFee bool       `json:"-" gorm:"column:reviewed_fee"`
+	Id          int        `json:"transaction_id"`
+	UserID      uint       `json:"user_id" gorm:"column:user_id;index"`
+	Ticker      string     `json:"ticker"`
+	Price       float64    `json:"price"`
+	Lot         int        `json:"lot"`
+	StockID     int        `json:"stock_id"`
+	BrokerID    int        `json:"broker_id"`
+	BrokerName  string     `json:"broker_name"`
+	Type        Type       `json:"type" gorm:"type:enum('BUY', 'SELL')"`
+	Date        time.Time  `json:"date"`
+	AmountDone  float64    `json:"amount_done"`
+	Tax         float64    `json:"tax"`
+	RefNo       string     `json:"ref_no,omitempty" gorm:"column:ref_no"`
 }
 
 type Type string

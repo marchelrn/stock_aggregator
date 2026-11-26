@@ -201,7 +201,7 @@ func (r *TransactionRepository) CreateTransactionAndSyncHolding(payload *models.
 }
 
 // History dates are WITA wall times in PostgreSQL's timestamp-without-zone column.
-const transactionHistoryColumns = "id, user_id, ticker, price, lot, stock_id, broker_id, broker_name, type, date AT TIME ZONE 'Asia/Makassar' AS date, amount_done, tax, ref_no"
+const transactionHistoryColumns = "id, user_id, ticker, price, lot, stock_id, broker_id, broker_name, type, date AT TIME ZONE 'Asia/Makassar' AS date, amount_done, tax, ref_no, email_sent_at"
 
 func (r *TransactionRepository) GetTransactions(userID uint, id int) ([]models.Transaction, error) {
 	var transactions []models.Transaction
@@ -276,10 +276,12 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 	//     fill details identifies it either way.
 	//   - (ticker, type, lot, price, date, broker): catches copies with empty
 	//     or differing RefNos (e.g. daily TC vs per-trade email).
-	seenRefFills := make(map[string]struct{}, len(trades))
-	seenIdentities := make(map[string]struct{}, len(trades))
+	seenRefFills := make(map[string]*models.Transaction, len(trades))
+	seenIdentities := make(map[string]*models.Transaction, len(trades))
 	deduped := make([]*models.Transaction, 0, len(trades))
+	aliases := make(map[*models.Transaction]*models.Transaction)
 	for _, trade := range trades {
+		trade.Id = 0
 		trade.UserID = userID
 		if trade.Date.IsZero() {
 			return 0, fmt.Errorf("trade date is required for cash eligibility")
@@ -313,13 +315,16 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 			}
 			trade.RefNo = canonical
 
-			refFill := fmt.Sprintf("%s|%s|%s|%d|%s",
+			refFill := fmt.Sprintf("%s|%s|%s|%d|%s|%d",
 				trade.RefNo, trade.Ticker, trade.Type, trade.Lot,
-				strconv.FormatFloat(trade.Price, 'f', -1, 64))
-			if _, dup := seenRefFills[refFill]; dup {
+				strconv.FormatFloat(trade.Price, 'f', -1, 64), trade.BrokerID)
+			if original, dup := seenRefFills[refFill]; dup {
+				if trade != original {
+					aliases[trade] = original
+				}
 				continue
 			}
-			seenRefFills[refFill] = struct{}{}
+			seenRefFills[refFill] = trade
 		}
 
 		identity := fmt.Sprintf("%s|%s|%d|%s|%s|%d",
@@ -329,10 +334,13 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 		if trade.ReviewedFee && trade.RefNo != "" {
 			identity += "|" + trade.RefNo
 		}
-		if _, dup := seenIdentities[identity]; dup {
+		if original, dup := seenIdentities[identity]; dup {
+			if trade != original {
+				aliases[trade] = original
+			}
 			continue
 		}
-		seenIdentities[identity] = struct{}{}
+		seenIdentities[identity] = trade
 		deduped = append(deduped, trade)
 	}
 	trades = deduped
@@ -430,6 +438,12 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 					var existing models.Transaction
 					err := query.First(&existing).Error
 					if err == nil {
+						trade.Id = existing.Id
+						if trade.EmailSentAt != nil && (existing.EmailSentAt == nil || trade.EmailSentAt.Before(*existing.EmailSentAt)) {
+							if err := tx.Model(&existing).Update("email_sent_at", trade.EmailSentAt).Error; err != nil {
+								return err
+							}
+						}
 						// Keep a duplicate on its original side of the cash boundary.
 						if (existing.Date.Hour() == 0 && existing.Date.Minute() == 0 && existing.Date.Second() == 0) &&
 							!(trade.Date.Hour() == 0 && trade.Date.Minute() == 0 && trade.Date.Second() == 0) &&
@@ -542,6 +556,13 @@ func (r *TransactionRepository) SyncTradeConfirmationBatch(userID uint, trades [
 
 	if len(groupErrs) > 0 {
 		return syncedCount, fmt.Errorf("gagal menyimpan %d kelompok transaksi (contoh: %w)", len(groupErrs), groupErrs[0])
+	}
+
+	for alias, original := range aliases {
+		for aliases[original] != nil {
+			original = aliases[original]
+		}
+		alias.Id = original.Id
 	}
 
 	return syncedCount, nil
