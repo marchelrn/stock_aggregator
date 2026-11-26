@@ -87,7 +87,7 @@ func testDoclingTransaction(t *testing.T, db *gorm.DB, path string, valid, gmail
 		svc := services.Gmail.(*GmailServiceImpl)
 		ctx := parser.WithBrokerScope(t.Context(), map[string]int{"ajaib sekuritas": broker.ID})
 		msg := &gmail.Message{Id: "docling-test-mail", InternalDate: sentAt.UnixMilli(), Payload: &gmail.MessagePart{
-			Filename: "/home/lerch/Downloads/TC_20240912_O0CP1B.pdf", PartId: "1", MimeType: "application/pdf", Body: &gmail.MessagePartBody{Data: base64.RawURLEncoding.EncodeToString(pdf)},
+			Filename: "TC_variant.pdf", PartId: "1", MimeType: "application/pdf", Body: &gmail.MessagePartBody{Data: base64.RawURLEncoding.EncodeToString(pdf)},
 			Headers: []*gmail.MessagePartHeader{{Name: "From", Value: "noreply@ajaib.co.id"}, {Name: "Subject", Value: "Rangkuman Transaksi Harian"}},
 		}}
 		local, pending, parseErr := svc.processSyncAttachments(ctx, nil, msg, user.Id, map[string][]models.TradeReview{}, map[uint]dto.PendingTradePDF{}, &found, &saved, new(int))
