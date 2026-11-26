@@ -40,6 +40,7 @@ func (r *CashMutationRepository) SyncCashMutationBatch(userID uint, mutations []
 			if item == nil || item.Date.IsZero() {
 				return fmt.Errorf("cash mutation date is required for cash eligibility")
 			}
+			item.ID = 0
 			item.UserID = userID
 			item.AppliedDelta = nil
 			if item.Amount <= 0 || math.IsNaN(item.Amount) || math.IsInf(item.Amount, 0) || MutationCashDelta(item) == 0 {
@@ -73,6 +74,7 @@ func (r *CashMutationRepository) SyncCashMutationBatch(userID uint, mutations []
 			if item.RefNo != "" {
 				err := tx.Where("user_id = ? AND broker_id = ? AND ref_no = ?", userID, item.BrokerID, item.RefNo).First(&existing).Error
 				if err == nil {
+					item.ID = existing.ID
 					continue
 				}
 				if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -88,6 +90,7 @@ func (r *CashMutationRepository) SyncCashMutationBatch(userID uint, mutations []
 			}
 			err := legacy.First(&existing).Error
 			if err == nil {
+				item.ID = existing.ID
 				if item.RefNo != "" {
 					if err := tx.Model(&existing).Update("ref_no", item.RefNo).Error; err != nil {
 						return err

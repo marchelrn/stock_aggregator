@@ -13,6 +13,7 @@
     "sender_domain": {"type": "string", "description": "Exact parsed sender domain, not a substring of the From header."},
     "subject_pattern": {"type": "string", "minLength": 1, "description": "Local RE2 subject classifier. Discovery uses sender/subject selectors, not this regex."},
     "filename_pattern": {"type": "string", "minLength": 1},
+    "require_filename_match": {"type":"boolean"},
     "exclude_filename_pattern": {"type": "string", "minLength": 1},
     "parse_mode": {
       "enum": ["metadata", "legacy"],
@@ -79,6 +80,7 @@
       "properties": {
         "extraction": {"enum": ["plain", "layout", "plain_then_layout"]},
         "column_header": {"type":"string"},
+        "page_net_pattern": {"type":"string","minLength":1},
         "column_subtotal": {"type":"string"},
         "ignore_patterns": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "Explicit RE2 patterns for repeated PDF page furniture, replaced with a newline before table parsing."},
 		"password_source": {"enum": ["broker"], "description": "Resolve the encrypted PDF password from the user's broker credential; never store passwords in template config."},

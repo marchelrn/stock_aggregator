@@ -51,6 +51,7 @@ func getMigrations() []migration {
 		&tradeReviews{},
 		&ajaibAndRights{},
 		&retryReviewDrafts{},
+		&verifyGmailCacheRows{},
 	}
 }
 

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/marchelrn/stock_api/models"
@@ -13,6 +14,12 @@ import (
 type TradeReviewRepository struct{ db *gorm.DB }
 
 func (r *TradeReviewRepository) List(ctx context.Context, uid uint, includeSaved bool) ([]models.TradeReview, error) {
+	if err := r.db.WithContext(ctx).Model(&models.TradeReview{}).
+		Where("user_id=? AND state='saved'", uid).
+		Where("NOT ("+importedRowsExist("trade_reviews", "transactions")+")").
+		Update("state", "pending").Error; err != nil {
+		return nil, err
+	}
 	rows := []models.TradeReview{}
 	q := r.db.WithContext(ctx).Omit("draft").Where("user_id = ?", uid)
 	if !includeSaved {
@@ -85,7 +92,18 @@ func (r *TradeReviewRepository) Save(ctx context.Context, uid, id uint, expected
 		if err != nil {
 			return err
 		}
-		return tx.Model(&row).Updates(map[string]any{"state": "saved", "draft": ""}).Error
+		ids := make([]int, 0, len(trades))
+		for _, trade := range trades {
+			if trade.Id <= 0 {
+				return errors.New("saved transaction has no database ID")
+			}
+			ids = append(ids, trade.Id)
+		}
+		encoded, err := json.Marshal(ids)
+		if err != nil {
+			return err
+		}
+		return tx.Model(&row).Updates(map[string]any{"state": "saved", "draft": "", "imported_ids": json.RawMessage(encoded)}).Error
 	})
 	return count, err
 }
