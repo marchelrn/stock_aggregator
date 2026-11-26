@@ -54,6 +54,7 @@ func getMigrations() []migration {
 		&verifyGmailCacheRows{},
 		&ajaibSenderDomain{},
 		&ajaibOptionalPDFTitle{},
+		&ajaibTradePages{},
 	}
 }
 
