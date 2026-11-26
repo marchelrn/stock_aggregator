@@ -487,6 +487,8 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       }
       if (!status.running) {
         if (status.result.trade_warning) toast.warn(status.result.trade_warning, { autoClose: false });
+        else if (status.result.trade_sync?.message)
+          toast.info(status.result.trade_sync.message);
         return status.result;
       }
     }
@@ -610,5 +612,7 @@ export function usePortfolio(): PortfolioContextValue {
 }
 
 function allowGeminiForSync(): boolean {
+  const provider = import.meta.env.VITE_TC_FALLBACK_PROVIDER;
+  if (provider === "ollama" || provider === "docling") return false;
   return window.confirm("Izinkan Google Gemini membaca PDF konfirmasi transaksi yang gagal dibaca selama sinkronisasi ini? PDF lengkap dapat memuat nama dan nomor rekening. Transaksi yang lolos validasi akan disimpan otomatis. Pilih Batal untuk melanjutkan dengan parser lokal saja.");
 }
