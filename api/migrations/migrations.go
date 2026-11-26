@@ -53,6 +53,7 @@ func getMigrations() []migration {
 		&retryReviewDrafts{},
 		&verifyGmailCacheRows{},
 		&ajaibSenderDomain{},
+		&ajaibOptionalPDFTitle{},
 	}
 }
 
