@@ -350,6 +350,8 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 	var emailCount int
 	var skippedCount, recoveredCount int
 	pendingMessages := make(map[string]int)
+	failedFallbacks := make(map[uint]dto.PendingTradePDF)
+	reported := make(map[uint]bool)
 	knownReviews := make(map[string][]models.TradeReview)
 	if s.Reviews != nil {
 		rows, err := s.Reviews.List(ctx, user.Id, true)
@@ -396,11 +398,19 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 				return nil, fmt.Errorf("get Gmail message %s: %w", msg.Id, err)
 			}
 			reviewed := 0
-			trades, unread, err := s.processMessageAttachments(ctx, gmailSrv, fullMsg, user.Id, knownReviews, &reviewed, &recoveredCount)
+			trades, unread, err := s.processSyncAttachments(ctx, gmailSrv, fullMsg, user.Id, knownReviews, failedFallbacks, &reviewed, &recoveredCount)
 			if err != nil {
 				return nil, fmt.Errorf("process Gmail message %s: %w", msg.Id, err)
 			}
-			pendingPDFs = append(pendingPDFs, unread...)
+			for _, pdf := range unread {
+				if pdf.ReviewID != 0 {
+					if reported[pdf.ReviewID] {
+						continue
+					}
+					reported[pdf.ReviewID] = true
+				}
+				pendingPDFs = append(pendingPDFs, pdf)
+			}
 			accepted := 0
 			for _, trade := range trades {
 				if names != nil && names[strings.ToLower(strings.TrimSpace(trade.BrokerName))] == 0 {
@@ -481,7 +491,10 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 	}
 	if len(pendingPDFs) > 0 {
 		message = fmt.Sprintf("%d transaksi baru disimpan. %d PDF belum terbaca. %s: %s", syncedCount, len(pendingPDFs), pendingPDFs[0].Filename, pendingPDFs[0].Reason)
-		log.Printf("Gmail trade sync: %d pending PDFs; checkpoint retained", len(pendingPDFs))
+		log.Printf("Gmail trade sync: %d pending PDFs; checkpoint retained; gemini_enabled=%t", len(pendingPDFs), geminiSyncEnabled(ctx))
+		for _, item := range pendingPDFs {
+			log.Printf("Gmail pending review=%d: %s", item.ReviewID, item.Reason)
+		}
 	}
 	return &dto.GmailSyncResponse{
 		PendingPDFs:  pendingPDFs,
@@ -1121,6 +1134,10 @@ func extractMessageDate(msg *gmail.Message) time.Time {
 
 // processMessageAttachments downloads and parses PDF attachments from a Gmail message
 func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailSrv *gmail.Service, msg *gmail.Message, uid uint, known map[string][]models.TradeReview, reviewed, recoveredCount *int) ([]dto.ParsedTrade, []dto.PendingTradePDF, error) {
+	return s.processSyncAttachments(ctx, gmailSrv, msg, uid, known, make(map[uint]dto.PendingTradePDF), reviewed, recoveredCount)
+}
+
+func (s *GmailServiceImpl) processSyncAttachments(ctx context.Context, gmailSrv *gmail.Service, msg *gmail.Message, uid uint, known map[string][]models.TradeReview, failedFallbacks map[uint]dto.PendingTradePDF, reviewed, recoveredCount *int) ([]dto.ParsedTrade, []dto.PendingTradePDF, error) {
 	if msg == nil || msg.Payload == nil {
 		return nil, nil, fmt.Errorf("Gmail message has no MIME payload")
 	}
@@ -1223,13 +1240,20 @@ func (s *GmailServiceImpl) processMessageAttachments(ctx context.Context, gmailS
 						return saveErr
 					}
 					if row.State == "pending" && geminiSyncEnabled(ctx) {
+						if failed, exists := failedFallbacks[row.ID]; exists {
+							pending = append(pending, failed)
+							return nil
+						}
 						n, found, fallbackErr := s.syncGeminiPDF(ctx, uid, row.ID, pdfBytes)
 						if fallbackErr == nil {
 							row.State = "saved"
 							*reviewed += found
 							*recoveredCount += n
 						} else {
-							pending = append(pending, dto.PendingTradePDF{Filename: part.Filename, Reason: "Transaksi belum dapat divalidasi. Coba sinkronkan kembali."})
+							failure := dto.PendingTradePDF{ReviewID: row.ID, Filename: part.Filename, Reason: fallbackErr.Error()}
+							failedFallbacks[row.ID] = failure
+							log.Printf("Gmail fallback review=%d: %s", row.ID, failure.Reason)
+							pending = append(pending, failure)
 						}
 						return nil
 					}

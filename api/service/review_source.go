@@ -189,21 +189,39 @@ func (s *GmailServiceImpl) syncGeminiPDF(parent context.Context, uid, id uint, p
 	defer cancel()
 	lease := rand.Text()
 	if err := s.Reviews.BeginExtraction(ctx, uid, id, "sync:application/pdf", lease); err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("Ekstraksi belum dapat dimulai. Coba lagi.")
 	}
 	defer func() {
 		release, done := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer done()
 		_ = s.Reviews.EndExtraction(release, uid, id, lease)
 	}()
-	draft, err := extractGemini(ctx, geminiClient, key, model, "application/pdf", pdf)
-	if err != nil {
-		return 0, 0, err
-	}
-	trades, err := validateTradeDraft(*draft)
+	trades, err := extractValidatedPDF(ctx, key, model, pdf)
 	if err != nil {
 		return 0, 0, err
 	}
 	count, err := s.Reviews.Save(ctx, uid, id, "pending", trades)
-	return count, len(trades), err
+	if err != nil {
+		return 0, 0, fmt.Errorf("Transaksi tervalidasi tetapi gagal disimpan.")
+	}
+	return count, len(trades), nil
+}
+
+func extractValidatedPDF(ctx context.Context, key, model string, pdf []byte) ([]*models.Transaction, error) {
+	var reason string
+	for attempt := 0; attempt < 2; attempt++ {
+		draft, err := extractGemini(ctx, geminiClient, key, model, "application/pdf", pdf, reason)
+		if err != nil {
+			return nil, err
+		}
+		trades, err := validateTradeDraft(*draft)
+		if err == nil {
+			return trades, nil
+		}
+		if attempt == 1 || ctx.Err() != nil {
+			return nil, err
+		}
+		reason = "Read the original document again. Correct only using printed evidence. Validation: " + err.Error()
+	}
+	return nil, errors.New("Hasil ekstraksi belum valid.")
 }

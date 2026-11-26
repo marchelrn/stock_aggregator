@@ -232,6 +232,7 @@ type ParsedTrade struct {
 }
 
 type PendingTradePDF struct {
+	ReviewID uint   `json:"-"`
 	Filename string `json:"filename"`
 	Reason   string `json:"reason"`
 }
