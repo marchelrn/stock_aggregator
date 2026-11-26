@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { formatCurrency, formatNumber } from '../lib/formatters'
 import { buildSectorDistribution, UNCLASSIFIED_SECTOR } from '../lib/sectors'
 import type { PortfolioSummary } from '../types'
@@ -8,6 +8,8 @@ interface BrokerCardsProps {
 }
 
 export default function BrokerCards({ summary }: BrokerCardsProps) {
+  const [hiddenBrokers, setHiddenBrokers] = useState<Set<number>>(() => new Set())
+  const seeMoreRef = useRef<HTMLAnchorElement>(null)
   const brokers = summary?.brokers || []
   const sortedBrokers = useMemo(
     () => [...brokers].sort((a, b) => b.total_value - a.total_value).map((broker) => ({
@@ -21,12 +23,33 @@ export default function BrokerCards({ summary }: BrokerCardsProps) {
     return <p className="mt-4 text-sm text-slate-600">Belum ada data broker.</p>
   }
 
+  const visibleBrokers = sortedBrokers.filter((broker) => !hiddenBrokers.has(broker.id))
+  const hiddenCount = sortedBrokers.length - visibleBrokers.length
+
+  function hideBroker(id: number) {
+    setHiddenBrokers((hidden) => new Set(hidden).add(id))
+    requestAnimationFrame(() => seeMoreRef.current?.focus({ preventScroll: true }))
+  }
+
   return (
-    <div className="mt-4 grid grid-cols-1 items-stretch gap-4 md:auto-rows-fr md:grid-cols-2 xl:grid-cols-3">
-      {sortedBrokers.map((broker) => (
+    <>
+      <div
+        id="broker-allocation-cards"
+        tabIndex={-1}
+        className="mt-4 grid scroll-mt-4 grid-cols-1 items-stretch gap-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-700 md:auto-rows-fr md:grid-cols-2 xl:grid-cols-3"
+      >
+      {visibleBrokers.map((broker) => (
         <article key={broker.id} className="flex min-w-0 flex-col rounded-xl border border-slate-300 bg-white p-5">
-          <header className="min-h-12">
+          <header className="flex min-h-12 flex-wrap items-start justify-between gap-x-3">
             <h3 className="break-words text-base font-semibold leading-6 text-slate-800">{broker.name}</h3>
+            <button
+              type="button"
+              aria-label={`Sembunyikan ${broker.name}`}
+              onClick={() => hideBroker(broker.id)}
+              className="-mt-2 inline-flex min-h-11 cursor-pointer items-center rounded-sm text-xs font-medium text-slate-600 hover:underline active:text-teal-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
+            >
+              Sembunyikan
+            </button>
           </header>
 
           <dl className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-5 pb-5">
@@ -76,6 +99,20 @@ export default function BrokerCards({ summary }: BrokerCardsProps) {
           </footer>
         </article>
       ))}
-    </div>
+      {visibleBrokers.length === 0 && (
+        <p className="text-sm text-slate-600">Semua kartu broker disembunyikan.</p>
+      )}
+      </div>
+      {hiddenCount > 0 && (
+        <a
+          ref={seeMoreRef}
+          href="#broker-allocation-cards"
+          onClick={() => setHiddenBrokers(new Set())}
+          className="mt-2 inline-flex min-h-11 cursor-pointer items-center rounded-sm text-sm font-semibold text-teal-700 underline underline-offset-4 hover:text-teal-800 active:text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-700"
+        >
+          See more ({hiddenCount})
+        </a>
+      )}
+    </>
   )
 }
