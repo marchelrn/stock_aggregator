@@ -37,6 +37,5 @@ skills-lock.json
 deploy/
 !api/service/ajaib_fallback_test.go
 !api/service/docling_pdf_test.go
-!api/service/ajaib_debug_capture_test.go
 !api/service/ajaib_market_test.go
 !api/service/parser/indonesian_market_test.go

@@ -340,7 +340,6 @@ func (s *GmailServiceImpl) syncTradeConfirmationsWithDate(ctx context.Context, g
 	if err != nil {
 		return nil, err
 	}
-	ctx = withAjaibDebugCapture(ctx, user.Id, selected)
 	names := parser.BrokerScope(ctx)
 	cacheType := tradeConfirmationCacheType
 	if names[strings.ToLower(ajaibBroker)] > 0 {
@@ -1363,7 +1362,6 @@ func (s *GmailServiceImpl) processSyncAttachments(ctx context.Context, gmailSrv 
 						} else {
 							failure := dto.PendingTradePDF{ReviewID: row.ID, Filename: part.Filename, Reason: fallbackErr.Error()}
 							failedFallbacks[row.ID] = failure
-							captureFailedAjaibPDF(ctx, row.BrokerName, row.ID, pdfBytes)
 							log.Printf("Gmail fallback review=%d: %s", row.ID, failure.Reason)
 							pending = append(pending, failure)
 						}
