@@ -80,6 +80,9 @@ func (p *CashEmailParser) Parse(ctx context.Context, meta EmailMetadata, emailDa
 	// Both text and HTML are normalized to the same representation. Executable
 	// and style content is ignored rather than treated as financial data.
 	text := normalizeEmailBody(body)
+	if !domesticCashNotice(meta.Subject, text) {
+		return nil, nil
+	}
 	for _, marker := range selected.markers {
 		if !marker.MatchString(text) {
 			return nil, fmt.Errorf("cash template %q: required marker missing", selected.template.Key)

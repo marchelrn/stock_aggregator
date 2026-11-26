@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import ThemeToggle from '../components/ThemeToggle'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { toast } from 'react-toastify'
 import { clearSession, isTokenExpired, syncSessionFromServer } from '../lib/session'
@@ -104,12 +104,18 @@ export default function LoginPage() {
           </button>
         </div>
 
-        <div className="mt-8 pt-6 border-t border-slate-300">
+        <div className="mt-6 border-t border-slate-300 pt-4">
           <div className="flex items-start gap-3 text-[16px] text-slate-500 leading-relaxed">
             <small>
               Ensure that you use the primary Gmail account that is registered with and linked to your securities/brokerage account.
             </small>
           </div>
+          <Link
+            to="/brokerlist"
+            className="mt-1 inline-flex min-h-11 cursor-pointer items-center rounded-sm text-sm font-semibold text-teal-700 underline underline-offset-4 hover:text-teal-800 active:text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-700"
+          >
+            Broker yang didukung
+          </Link>
         </div>
       </div>
     </div>

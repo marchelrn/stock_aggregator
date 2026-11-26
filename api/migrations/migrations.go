@@ -51,6 +51,11 @@ func getMigrations() []migration {
 		&tradeReviews{},
 		&ajaibAndRights{},
 		&retryReviewDrafts{},
+		&verifyGmailCacheRows{},
+		&ajaibSenderDomain{},
+		&ajaibOptionalPDFTitle{},
+		&ajaibTradePages{},
+		&ajaibTCAttachmentNames{},
 	}
 }
 

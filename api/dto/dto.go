@@ -238,6 +238,9 @@ type PendingTradePDF struct {
 }
 
 type GmailSyncResponse struct {
+	EmailsFound  int               `json:"emails_found"`
+	EmailsCached int               `json:"emails_cached"`
+	PDFsExcluded int               `json:"pdfs_excluded"`
 	PendingPDFs  []PendingTradePDF `json:"pending_pdfs,omitempty"`
 	StatusCode   int               `json:"status_code"`
 	Message      string            `json:"message"`

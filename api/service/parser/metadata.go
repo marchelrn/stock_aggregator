@@ -80,6 +80,7 @@ type MetadataConfig struct {
 	SenderDomain           string          `json:"sender_domain,omitempty"`
 	SubjectPattern         string          `json:"subject_pattern,omitempty"`
 	Trade                  *MetadataTrade  `json:"trade,omitempty"`
+	RequireFilenameMatch   bool            `json:"require_filename_match,omitempty"`
 	FilenamePattern        string          `json:"filename_pattern,omitempty"`
 	ExcludeFilenamePattern string          `json:"exclude_filename_pattern,omitempty"`
 }
@@ -780,10 +781,16 @@ func (c *compiledMetadata) excludesFilename(name string) bool {
 }
 
 func (c *compiledMetadata) matchesEmailSelectors(meta EmailMetadata) bool {
+	return c.matchesEmailHeaders(meta) && c.matchesEmailFilename(meta.Filename)
+}
+
+func (c *compiledMetadata) matchesEmailFilename(name string) bool {
+	return (c.filename == nil || c.filename.MatchString(name)) &&
+		strings.HasSuffix(strings.ToLower(name), strings.ToLower(c.template.FilenameSuffix))
+}
+
+func (c *compiledMetadata) matchesEmailHeaders(meta EmailMetadata) bool {
 	t := c.template
-	if c.filename != nil && !c.filename.MatchString(meta.Filename) {
-		return false
-	}
 	if c.config.SenderDomain != "" {
 		from, err := mail.ParseAddress(meta.From)
 		if err != nil {
@@ -803,8 +810,7 @@ func (c *compiledMetadata) matchesEmailSelectors(meta EmailMetadata) bool {
 			return false
 		}
 	}
-	return strings.Contains(strings.ToLower(meta.Subject), strings.ToLower(t.SubjectContains)) &&
-		strings.HasSuffix(strings.ToLower(meta.Filename), strings.ToLower(t.FilenameSuffix))
+	return strings.Contains(strings.ToLower(meta.Subject), strings.ToLower(t.SubjectContains))
 }
 
 func ValidSenderDomain(domain string) bool {

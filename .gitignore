@@ -21,7 +21,6 @@ skills-lock.json
 # Tests and investigation tools are maintained on the testing branch
 *_test.go
 !api/service/parser/ajaib_test.go
-!api/service/ajaib_fallback_test.go
 !api/service/stockbit_rights_test.go
 !api/service/gmail_scheduler_test.go
 !api/service/gmail_cash_history_test.go
@@ -36,3 +35,8 @@ skills-lock.json
 /api/cmd/inspect_jago_and_statement/
 /api/cmd/investigate_cash_leak/
 deploy/
+!api/service/ajaib_fallback_test.go
+!api/service/docling_pdf_test.go
+!api/service/ajaib_debug_capture_test.go
+!api/service/ajaib_market_test.go
+!api/service/parser/indonesian_market_test.go

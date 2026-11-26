@@ -18,6 +18,7 @@ import (
 // MetadataTrade contains broker-independent policies for rows, references and
 // fee allocation. Labels, capture groups and rates belong to the DB template.
 type MetadataTrade struct {
+	PageNetPattern   string                       `json:"page_net_pattern,omitempty"`
 	ColumnHeader     string                       `json:"column_header,omitempty"`
 	ColumnSubtotal   string                       `json:"column_subtotal,omitempty"`
 	IgnorePatterns   []string                     `json:"ignore_patterns,omitempty"`
@@ -61,13 +62,20 @@ func (c *compiledMetadata) extractPDF(ctx context.Context, data []byte, mode str
 	if mode != "layout" {
 		return extractMetadataPDF(ctx, data)
 	}
-	args := []string{"-layout"}
+	var password string
 	if c.config.Trade.PasswordSource == "broker" {
 		passwords, _ := ctx.Value(pdfPasswordsContextKey{}).(map[string]string)
-		password := passwords[strings.ToLower(strings.TrimSpace(c.template.BrokerName))]
+		password = passwords[strings.ToLower(strings.TrimSpace(c.template.BrokerName))]
 		if password == "" {
 			return "", errors.New("password PDF broker belum dikonfigurasi")
 		}
+	}
+	return extractLayoutPDF(ctx, data, password)
+}
+
+func extractLayoutPDF(ctx context.Context, data []byte, password string) (string, error) {
+	args := []string{"-layout"}
+	if password != "" {
 		args = append(args, "-upw", password)
 	}
 	args = append(args, "-", "-")
@@ -125,6 +133,12 @@ func (c *compiledMetadata) compileGenericTrade() (compiledMetadata, error) {
 	if t.SellAmount != "add" && t.SellAmount != "subtract" {
 		return *c, errors.New("invalid sell amount policy")
 	}
+	if t.PageNetPattern != "" {
+		net, err := compilePattern(t.PageNetPattern)
+		if err != nil || net.NumSubexp() != 1 || t.Extraction != "layout" {
+			return *c, errors.New("trade page net pattern requires one capture and layout extraction")
+		}
+	}
 	for _, rate := range []float64{t.BuyFallbackRate, t.SellFallbackRate} {
 		if rate < 0 || rate > 1 || math.IsNaN(rate) || math.IsInf(rate, 0) {
 			return *c, errors.New("invalid fee fallback rate")
@@ -173,6 +187,59 @@ func (c *compiledMetadata) compileGenericTrade() (compiledMetadata, error) {
 }
 
 func (c *compiledMetadata) parseGenericTrades(content string, meta *EmailMetadata) ([]dto.ParsedTrade, error) {
+	pattern := c.config.Trade.PageNetPattern
+	if pattern == "" {
+		return c.parseGenericTradeTable(content, meta, 0)
+	}
+	settlement, err := compilePattern(pattern)
+	if err != nil {
+		return nil, err
+	}
+	var trades []dto.ParsedTrade
+	for page, text := range strings.Split(content, "\f") {
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		if c.firstMissingMarker(text) != 0 {
+			return nil, fmt.Errorf("trade PDF page %d: broker marker missing", page+1)
+		}
+		rows, err := c.parseGenericTradeTable(text, meta, len(trades))
+		if err != nil {
+			return nil, fmt.Errorf("trade PDF page %d: %w", page+1, err)
+		}
+		rawNet, err := captureEmailField(settlement, 1, text, true)
+		if err != nil {
+			return nil, fmt.Errorf("trade PDF page %d: printed settlement: %w", page+1, err)
+		}
+		accountingDebit := strings.HasPrefix(rawNet, "(") && strings.HasSuffix(rawNet, ")")
+		if accountingDebit {
+			rawNet = strings.TrimSpace(rawNet[1 : len(rawNet)-1])
+		}
+		expected, err := c.config.Numbers.parse(rawNet)
+		if err != nil {
+			return nil, fmt.Errorf("trade PDF page %d: invalid printed settlement", page+1)
+		}
+		var actual float64
+		for _, row := range rows {
+			if row.Type == "BUY" {
+				actual -= row.AmountDone
+			} else {
+				actual += row.AmountDone
+			}
+		}
+		amount, _ := expected.Float64()
+		if amount < 0 || math.Abs(math.Abs(actual)-amount) > 0.005 || (accountingDebit && actual > 0) {
+			return nil, fmt.Errorf("trade PDF page %d: net amount differs from printed settlement", page+1)
+		}
+		trades = append(trades, rows...)
+	}
+	if len(trades) == 0 {
+		return nil, errors.New("trade PDF contains no transactions")
+	}
+	return trades, nil
+}
+
+func (c *compiledMetadata) parseGenericTradeTable(content string, meta *EmailMetadata, rowOffset int) ([]dto.ParsedTrade, error) {
 	cfg, policy := c.config, c.config.Trade
 	for _, pattern := range policy.IgnorePatterns {
 		r, err := compilePattern(pattern)
@@ -291,7 +358,7 @@ func (c *compiledMetadata) parseGenericTrades(content string, meta *EmailMetadat
 		}
 		ref := fields["ref"]
 		if policy.RefTemplate != "" {
-			replace := []string{"{date}", date.Format("20060102"), "{ticker}", fields["ticker"], "{sequence}", strconv.Itoa(len(trades) + 1), "{ref}", ref}
+			replace := []string{"{date}", date.Format("20060102"), "{ticker}", fields["ticker"], "{sequence}", strconv.Itoa(rowOffset + len(trades) + 1), "{ref}", ref}
 			for name, field := range policy.ReferenceFields {
 				source := content
 				if field.Source != "body" {

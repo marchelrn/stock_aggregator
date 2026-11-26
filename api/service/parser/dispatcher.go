@@ -68,7 +68,11 @@ func (d *BrokerDispatcherParser) selectTemplate(ctx context.Context, meta EmailM
 		if template.kind != KindTrade || template.document != DocumentPDF || template.discoveryOnly {
 			continue
 		}
-		if !template.matchesEmailSelectors(meta) {
+		if !template.matchesEmailHeaders(meta) {
+			continue
+		}
+		if !template.matchesEmailFilename(meta.Filename) {
+			excluded = excluded || template.config.RequireFilenameMatch
 			continue
 		}
 		if template.excludesFilename(meta.Filename) {
@@ -324,23 +328,28 @@ func (d *BrokerDispatcherParser) EmailSelectorsForKinds(ctx context.Context, kin
 // ReviewBroker requires positive trade-document evidence in addition to the active
 // broker selectors. Some senders also deliver account statements from the same mailbox.
 func (d *BrokerDispatcherParser) ReviewBroker(ctx context.Context, meta EmailMetadata) (string, error) {
+	broker, _, err := d.ReviewAttachment(ctx, meta)
+	return broker, err
+}
+
+func (d *BrokerDispatcherParser) ReviewAttachment(ctx context.Context, meta EmailMetadata) (broker string, excluded bool, err error) {
 	name := strings.ToLower(meta.Filename)
 	if strings.Contains(name, "_tcbond_") {
-		return "", nil
+		return "", true, nil
 	}
 	t, err := d.selectTemplate(ctx, meta)
 	if errors.Is(err, ErrEmailNotApplicable) {
-		return "", nil
+		return "", true, nil
 	}
 	if err != nil || t == nil {
-		return "", err
+		return "", false, err
 	}
 	if t.template.EmailSender == "" && t.config.SenderDomain == "" {
-		return "", nil
+		return "", false, nil
 	}
 	if t.template.SubjectContains == "" && t.subject == nil && t.filename == nil &&
 		!strings.Contains(strings.ToLower(meta.Subject), "trade confirmation") && !strings.HasPrefix(name, "tc_") && !strings.HasPrefix(name, "tc-") {
-		return "", nil
+		return "", false, nil
 	}
-	return t.template.BrokerName, nil
+	return t.template.BrokerName, false, nil
 }
