@@ -85,6 +85,11 @@ function PerformanceInfo() {
                 perubahan nilai portofolio.
               </li>
               <li>
+                Sistem melakukan perhitungan performa setelah{" "}
+                <i>Sync Trade Confirmation</i> data selesai, yaitu pada jam
+                11:59 WITA.
+              </li>
+              <li>
                 Perubahan nilai mencakup pergerakan harga dan perubahan saldo,
                 termasuk setoran, penarikan, atau transfer.
               </li>
