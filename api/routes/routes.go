@@ -111,6 +111,7 @@ func SetupRoutes(s *contract.Service) *gin.Engine {
 		// Transaction routes
 		protected.GET("/transaction/:id", transactionController.GetTransaction) // Get a specific transaction by ID
 		protected.GET("/api/history", transactionController.History)
+		protected.GET("/api/portfolio/performance", handler.PortfolioPerformance(s.Performance))
 		protected.GET("/transactions", transactionController.GetAllTransactions) // Get all transactions
 		protected.POST("/transaction", transactionController.CreateTransaction)
 		protected.DELETE("/transaction/:id", transactionController.DeleteTransaction)

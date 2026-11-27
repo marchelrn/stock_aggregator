@@ -8,6 +8,7 @@ import (
 )
 
 type Service struct {
+	Performance PortfolioPerformanceRepository
 	Stocks      StocksService
 	Brokers     BrokersService
 	Transaction TransactionService

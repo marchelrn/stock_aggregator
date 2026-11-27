@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -34,6 +35,7 @@ func Run() {
 
 	// Sync Gmail otomatis tiap jam pada menit 00.
 	service.NewGmailScheduler(srv.Gmail, repo.Auth).Start()
+	service.StartPortfolioPerformance(context.Background(), repo.Performance, srv.Yahoo)
 
 	serv := &http.Server{
 		Addr:    fmt.Sprintf(":%s", cfg.Port),

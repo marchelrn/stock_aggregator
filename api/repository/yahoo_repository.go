@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"github.com/marchelrn/stock_api/contract"
 	"github.com/marchelrn/stock_api/models"
 	"gorm.io/gorm"
@@ -48,7 +50,9 @@ func (r *YahooRepository) GetAllPrices() ([]models.StockPrice, error) {
 }
 
 func (r *YahooRepository) SavePrice(price *models.StockPrice) error {
-	cols := []string{"price", "previous_close", "change", "change_percent", "currency", "updated_at", "quoted_at"}
+	observedAt := time.Now().UTC()
+	price.ObservedAt = &observedAt
+	cols := []string{"price", "previous_close", "change", "change_percent", "currency", "updated_at", "quoted_at", "observed_at"}
 	if price.Sector != "" {
 		cols = append(cols, "sector")
 	}

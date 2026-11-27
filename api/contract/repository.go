@@ -24,6 +24,7 @@ type RightExerciseRepository interface {
 }
 
 type Repository struct {
+	Performance   PortfolioPerformanceRepository
 	Rights        RightExerciseRepository
 	Reviews       TradeReviewRepository
 	Stocks        StocksRepository
@@ -34,6 +35,12 @@ type Repository struct {
 	Auth          AuthRepository
 	PDFTemplates  PDFTemplateRepository
 	GmailCache    GmailCacheRepository
+}
+
+type PortfolioPerformanceRepository interface {
+	List(context.Context, uint, string) ([]dto.PortfolioPerformancePoint, error)
+	MissingTickers(context.Context, time.Time, time.Time) ([]string, error)
+	Capture(context.Context, time.Time, time.Time, time.Time) error
 }
 
 type PDFTemplateRepository interface {

@@ -23,6 +23,7 @@ func New(repo *contract.Repository) (*contract.Service, error) {
 	gmail.Reviews = repo.Reviews
 	gmail.Rights = repo.Rights
 	return &contract.Service{
+		Performance: repo.Performance,
 		Stocks:      ImplStocksService(repo.Stocks, repo.Brokers, repo.Transactions, yahooSvc),
 		Brokers:     ImplBrokersService(repo.Brokers),
 		Transaction: ImplTransactionService(repo),

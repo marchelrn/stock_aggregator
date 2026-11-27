@@ -40,6 +40,7 @@ type StockHolding struct {
 }
 
 type StockPrice struct {
+	ObservedAt    *time.Time `json:"-"`
 	QuotedAt      *time.Time `json:"quoted_at,omitempty"`
 	Stale         bool       `gorm:"-" json:"stale,omitempty"`
 	Id            int        `json:"id"`
