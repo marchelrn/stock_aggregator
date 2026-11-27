@@ -102,6 +102,7 @@ export function buildSummary(
       name: b.name,
       cash: num(b.cash),
       stock_value: 0,
+      invested_value: 0,
       total_value: num(b.cash),
       holdings: [],
       weight: 0,
@@ -116,6 +117,7 @@ export function buildSummary(
         name: h.broker_name || `Broker ${brokerId}`,
         cash: 0,
         stock_value: 0,
+        invested_value: 0,
         total_value: 0,
         holdings: [],
         weight: 0,
@@ -128,6 +130,7 @@ export function buildSummary(
     const marketValue = shares * currentPrice
 
     broker.stock_value += marketValue
+    broker.invested_value += shares * num(h.avg_price)
     broker.total_value = broker.cash + broker.stock_value
     const tickerKey = String(h.ticker || '').toUpperCase()
     const resolvedSector = h.sector || tickerMap.get(tickerKey)?.sector || priceMap?.[tickerKey]?.sector || null

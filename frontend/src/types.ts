@@ -99,6 +99,7 @@ export interface BrokerSummary {
   name: string
   cash: number
   stock_value: number
+  invested_value: number
   total_value: number
   holdings: Holding[]
   weight: number

@@ -116,12 +116,7 @@ export default function DashboardPage() {
         <KpiGrid summary={state.summary} />
       </section>
 
-      <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-xl font-semibold">Broker Allocation</h2>
-        </div>
-        <BrokerCards summary={state.summary} />
-      </section>
+      <BrokerCards summary={state.summary} />
 
       <section className="rounded-2xl border border-slate-300 bg-white/80 p-4 shadow-sm backdrop-blur">
         <div className="flex items-center justify-between gap-2">
