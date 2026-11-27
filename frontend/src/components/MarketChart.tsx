@@ -2,7 +2,9 @@ import { useId } from 'react'
 import { formatNumber } from '../lib/formatters'
 import type { MarketDetail } from '../types'
 
-export default function MarketChart({ ticker, history }: Pick<MarketDetail, 'ticker' | 'history'>) {
+type MarketChartProps = Pick<MarketDetail, 'ticker' | 'history'> & { description?: string }
+
+export default function MarketChart({ ticker, history, description = 'histori harga harian satu bulan' }: MarketChartProps) {
   const id = useId()
   const points = history.filter((point) => Number.isFinite(point.close) && Number.isFinite(point.time))
     .slice().sort((a, b) => a.time - b.time)
@@ -31,7 +33,7 @@ export default function MarketChart({ ticker, history }: Pick<MarketDetail, 'tic
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="mt-4 w-full" role="img" aria-labelledby={id}>
-      <title id={id}>{ticker}: histori harga harian satu bulan. Awal {formatNumber(first.close)}, terakhir {formatNumber(last.close)}.</title>
+      <title id={id}>{ticker}: {description}. Awal {formatNumber(first.close)}, terakhir {formatNumber(last.close)}.</title>
       {[0, 0.5, 1].map((fraction) => {
         const value = low + (high - low) * fraction
         return (

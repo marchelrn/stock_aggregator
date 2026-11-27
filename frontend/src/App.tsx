@@ -10,6 +10,7 @@ import {
 } from "react-router-dom";
 import { Menu, SquareArrowRightExit, X } from "lucide-react";
 import DashboardPage from "./pages/DashboardPage";
+import PerformancePage from "./pages/PerformancePage";
 import BrokersPage from "./pages/BrokersPage";
 import MarketPage from "./pages/MarketPage";
 import LoginPage from "./pages/LoginPage";
@@ -85,7 +86,7 @@ function Nav() {
   }, [open]);
 
   if (
-    !["/", "/manage", "/market"].includes(
+    !["/", "/manage", "/market", "/performance"].includes(
       location.pathname.replace(/\/$/, "") || "/",
     ) ||
     !isAuthenticated()
@@ -141,6 +142,7 @@ function Nav() {
           {[
             ["/", "Dashboard"],
             ["/manage", "Broker"],
+            ["/performance", "Performance"],
             ["/market", "Market"],
           ].map(([path, label]) => (
             <NavLink
@@ -223,6 +225,14 @@ export default function App() {
             element={
               <RequireAuth requireSetup>
                 <DashboardPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/performance"
+            element={
+              <RequireAuth requireSetup>
+                <PerformancePage />
               </RequireAuth>
             }
           />
